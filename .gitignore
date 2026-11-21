@@ -1,0 +1,14 @@
+target/
+node_modules/
+.next/
+out/
+dist/
+.anchor/
+test-ledger/
+.scratch/
+.claude/
+ui-design/
+.env*
+*-keypair.json
+*.keypair
+.DS_Store
