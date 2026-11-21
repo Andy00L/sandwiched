@@ -1,0 +1,20 @@
+pub const MAX_SEATS: usize = 21;
+pub const MIN_PLAYERS: u8 = 2;
+pub const MAX_BOXES: usize = 3;
+pub const CHIPS_PER_ANTE: u64 = 100;
+pub const PERCHES_PER_BOX: u8 = 8;
+pub const SWAT_DROP_PERCENT: u64 = 50;
+pub const MAX_SWITCHES: u8 = 3;
+pub const SWAT_HISTORY_LEN: usize = 8;
+
+pub const LOBBY_MS: u64 = 20_000;
+pub const DRAW_TIMEOUT_MS: u64 = 5_000;
+pub const HIDE_MS: u64 = 5_000;
+pub const ROUND_MS: u64 = 45_000;
+pub const FLIGHT_MS: u64 = 500;
+pub const PECK_COOLDOWN_MS: u64 = 300;
+pub const EMPTY_BOX_STUN_MS: u64 = 2_000;
+pub const SWAT_WINDUP_MS: u64 = 350;
+pub const SWAT_COOLDOWN_MS: u64 = 900;
+pub const SWAT_STUN_MS: u64 = 1_500;
+pub const SWITCH_COOLDOWN_MS: u64 = 8_000;

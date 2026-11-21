@@ -1,0 +1,11 @@
+[package]
+name = "sandwich-rules"
+version = "0.1.0"
+description = "The rules of Sandwich as pure functions: no chain, no clock, no randomness source."
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest = "1"

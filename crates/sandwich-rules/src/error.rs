@@ -1,0 +1,23 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuleError {
+    ZeroTickLength,
+    BadBox,
+    BadBoxCount,
+    TooFewPlayers,
+    TooManyPlayers,
+    LobbyStillOpen,
+    RoundOver,
+    RoundNotOver,
+    Stunned,
+    PeckTooSoon,
+    NotPerched,
+    AlreadyThere,
+    AlreadyHovering,
+    BoxFull,
+    HandBusy,
+    OneBoxCannotSwitch,
+    NoSwitchesLeft,
+    SwitchTooSoon,
+    MathOverflow,
+    ChipsNotConserved,
+}
