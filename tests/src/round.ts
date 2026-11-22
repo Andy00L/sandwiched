@@ -67,14 +67,23 @@ import {
   walletAta,
 } from "./sandwich";
 
-const PLAYER_COUNT = 6;
+const DEFAULT_PLAYER_COUNT = 6;
+const DEFAULT_ACTIONS_PER_SECOND = 3;
+const MIN_PLAYERS = 2;
+const MAX_SEATS = 21;
+const PERCHES_PER_BOX = 8;
 const ANTE_UNITS = 100_000n;
 const BOX_COUNT = 3;
 const DEPOSIT_UNITS = 1_000_000n;
+const DEPOSIT_ATTEMPTS = 3;
+const DEPOSIT_LANDING_MS = 20_000;
+const TOKENS_SETTLE_MS = 30_000;
+const TOKENS_POLL_MS = 1_000;
 const BUY_IN_CHIPS = 300n;
 const PLAY_MS = 44_500;
-const PECK_INTERVAL_MS = 330;
-const SWAT_INTERVAL_MS = 1_300;
+const PECK_JITTER_MS = 40;
+const SWAT_INTERVAL_MS = 2_600;
+const T2_SUCCESS_RATE = 0.99;
 const FLIGHT_WAIT_MS = 550;
 const EMPTY_BOX_STUN_WAIT_MS = 2_100;
 const DODGE_WAIT_MS = 500;
@@ -85,6 +94,7 @@ const POLL_MS = 100;
 const FAST_POLL_MS = 20;
 const BLOCKHASH_REFRESH_MS = 1_000;
 
+type RunOptions = { playerCount: number; actionsPerSecond: number };
 type Player = { name: string; wallet: Keypair; sessionSigner: Keypair };
 type ActionRecord = { player: string; action: string; ok: boolean; kind: string; error: string | null; sentAtMs: number; ackMs: number };
 type SwatLanding = { signature: string; landsTick: bigint; looseBefore: bigint[]; looseAfter: bigint[] };
@@ -102,6 +112,21 @@ type Context = {
 };
 
 const log = (functionName: string, message: string): void => console.log(`[${functionName}] ${message}`);
+
+const readNumberFlag = (args: string[], flag: string, fallback: number): number => {
+  const index = args.indexOf(flag);
+  return index === -1 ? fallback : Number(args[index + 1]);
+};
+
+const readRunOptions = (args: string[]): Result<RunOptions> => {
+  const playerCount = readNumberFlag(args, "--players", DEFAULT_PLAYER_COUNT);
+  const actionsPerSecond = readNumberFlag(args, "--rate", DEFAULT_ACTIONS_PER_SECOND);
+  if (!Number.isInteger(playerCount) || playerCount < MIN_PLAYERS || playerCount > MAX_SEATS) {
+    return failure(`[readRunOptions] --players must be a whole number from ${MIN_PLAYERS} to ${MAX_SEATS}`);
+  }
+  if (!Number.isFinite(actionsPerSecond) || actionsPerSecond <= 0) return failure("[readRunOptions] --rate must be a number of actions a second above 0");
+  return success({ playerCount, actionsPerSecond });
+};
 
 const actorOf = (context: Context, player: Player): SeatActor => ({
   signer: player.sessionSigner.publicKey,
@@ -147,8 +172,8 @@ const waitForDelegation = (context: Context, account: PublicKey) =>
     POLL_MS,
   );
 
-const waitForTokenUnits = (connection: Connection, account: PublicKey, expected: bigint, label: string) =>
-  pollUntil(label, async () => ((await readTokenUnits(connection, account)) === expected ? expected : null), PROPAGATION_TIMEOUT_MS, POLL_MS);
+const waitForTokenUnits = (connection: Connection, account: PublicKey, expected: bigint, label: string, timeoutMs = PROPAGATION_TIMEOUT_MS) =>
+  pollUntil(label, async () => ((await readTokenUnits(connection, account)) === expected ? expected : null), timeoutMs, POLL_MS);
 
 const seatPlayer = async (context: Context, player: Player): Promise<Result<string>> => {
   const admin = context.admin;
@@ -171,18 +196,24 @@ const seatPlayer = async (context: Context, player: Player): Promise<Result<stri
   return success(player.name);
 };
 
-const depositToRollup = async (context: Context, player: Player): Promise<Result<bigint>> => {
+const depositToRollup = async (context: Context, player: Player, stuckShuttles: string[]): Promise<Result<bigint>> => {
   const admin = context.admin;
   const wallet = player.wallet.publicKey;
   const ata = walletAta(wallet, context.mint);
-  const depositIxs = await delegateSpl(wallet, context.mint, DEPOSIT_UNITS, { validator: context.validator, payer: admin.publicKey });
-  const deposited = await sendOnBase(context.base, depositIxs, [admin, player.wallet]);
-  if (!deposited.ok) return failure(`[depositToRollup] ${player.name} deposit: ${deposited.reason}`);
-  const depositVisible = await waitForTokenUnits(context.rollup, ata, DEPOSIT_UNITS, `${player.name} deposit on the rollup`);
-  if (!depositVisible.ok) return failure(`[depositToRollup] ${depositVisible.reason}`);
-  const tokensAfterDeposit = (await readTokenUnits(context.base, ata)) + (await readTokenUnits(context.rollup, ata));
-  log("depositToRollup", `${player.name} deposited, ${tokensAfterDeposit} units across base and rollup`);
-  return success(tokensAfterDeposit);
+  for (let attemptNumber = 1; attemptNumber <= DEPOSIT_ATTEMPTS; attemptNumber += 1) {
+    const depositIxs = await delegateSpl(wallet, context.mint, DEPOSIT_UNITS, { validator: context.validator, payer: admin.publicKey });
+    const deposited = await sendOnBase(context.base, depositIxs, [admin, player.wallet]);
+    if (!deposited.ok) return failure(`[depositToRollup] ${player.name} deposit: ${deposited.reason}`);
+    const depositVisible = await waitForTokenUnits(context.rollup, ata, DEPOSIT_UNITS, `${player.name} deposit on the rollup`, DEPOSIT_LANDING_MS);
+    if (depositVisible.ok) {
+      const tokensAfterDeposit = (await readTokenUnits(context.base, ata)) + (await readTokenUnits(context.rollup, ata));
+      log("depositToRollup", `${player.name} deposited, ${tokensAfterDeposit} units across base and rollup`);
+      return success(tokensAfterDeposit);
+    }
+    stuckShuttles.push(`${player.name} deposit ${attemptNumber} (${deposited.value.signature})`);
+    log("depositToRollup", `${player.name} deposit ${attemptNumber} not on the rollup after ${DEPOSIT_LANDING_MS} ms, its shuttle is stuck; sending a new one`);
+  }
+  return failure(`[depositToRollup] ${player.name}: ${DEPOSIT_ATTEMPTS} deposits never reached the rollup`);
 };
 
 const readSeats = async (context: Context, players: Player[]): Promise<Result<SeatView[]>> => {
@@ -239,6 +270,7 @@ const playRound = async (
   players: Player[],
   live: TableView,
   liveTable: { view: TableView },
+  peckIntervalMs: number,
 ): Promise<{ records: ActionRecord[]; landings: SwatLanding[] }> => {
   const landings: SwatLanding[] = [];
   if (live.phase.kind !== "live") return { records: [], landings };
@@ -250,6 +282,7 @@ const playRound = async (
   const stopAt = playStartedAt + PLAY_MS;
   const sandwichBox = live.sandwichBox;
   const emptyBox = (sandwichBox + 1) % BOX_COUNT;
+  const findHomeBox = (pigeonIndex: number) => (sandwichBox + Math.floor(pigeonIndex / PERCHES_PER_BOX)) % BOX_COUNT;
   const isPlaying = () => performance.now() < stopAt;
 
   const act = async (player: Player, action: string, instruction: TransactionInstruction): Promise<RollupAck> => {
@@ -266,39 +299,50 @@ const playRound = async (
     });
     return ack;
   };
-  const peckLoop = async (player: Player, dodgesSwats: boolean) => {
+  const peckLoop = async (player: Player, homeBox: number, dodgesSwats: boolean) => {
     let lastSwatCount = liveTable.view.swatCount;
+    let nextPeckAt = performance.now();
     while (isPlaying()) {
       const swatCount = liveTable.view.swatCount;
       const hand = liveTable.view.hand;
-      if (dodgesSwats && swatCount > lastSwatCount && hand.kind === "raised" && hand.boxIndex === sandwichBox) {
+      if (dodgesSwats && swatCount > lastSwatCount && hand.kind === "raised" && hand.boxIndex === homeBox) {
         lastSwatCount = swatCount;
         await act(player, "take_off", await buildTakeOffIx(context.program, actorOf(context, player)));
         await sleep(DODGE_WAIT_MS);
-        await act(player, "fly_to", await buildFlyToIx(context.program, actorOf(context, player), sandwichBox));
+        await act(player, "fly_to", await buildFlyToIx(context.program, actorOf(context, player), homeBox));
         await sleep(FLIGHT_WAIT_MS);
+        nextPeckAt = performance.now();
         continue;
       }
       await act(player, "peck", await buildPeckIx(context.program, actorOf(context, player)));
-      await sleep(PECK_INTERVAL_MS + Math.floor(Math.random() * 40));
+      nextPeckAt += peckIntervalMs;
+      const jitterMs = (Math.random() - 0.5) * PECK_JITTER_MS;
+      await sleep(Math.max(0, nextPeckAt + jitterMs - performance.now()));
     }
   };
-  const greedy = async (player: Player) => {
-    await act(player, "fly_to", await buildFlyToIx(context.program, actorOf(context, player), sandwichBox));
+  const greedy = async (player: Player, homeBox: number) => {
+    await act(player, "fly_to", await buildFlyToIx(context.program, actorOf(context, player), homeBox));
     await sleep(FLIGHT_WAIT_MS);
-    await peckLoop(player, false);
+    await peckLoop(player, homeBox, false);
   };
-  const nervous = async (player: Player) => {
-    await act(player, "fly_to", await buildFlyToIx(context.program, actorOf(context, player), sandwichBox));
+  const nervous = async (player: Player, homeBox: number) => {
+    await act(player, "fly_to", await buildFlyToIx(context.program, actorOf(context, player), homeBox));
     await sleep(FLIGHT_WAIT_MS);
-    await peckLoop(player, true);
+    await peckLoop(player, homeBox, true);
   };
-  const wanderer = async (player: Player) => {
+  const wanderer = async (player: Player, homeBox: number) => {
     await act(player, "fly_to", await buildFlyToIx(context.program, actorOf(context, player), emptyBox));
     await sleep(FLIGHT_WAIT_MS);
     await act(player, "peck", await buildPeckIx(context.program, actorOf(context, player)));
     await sleep(EMPTY_BOX_STUN_WAIT_MS);
-    await greedy(player);
+    await greedy(player, homeBox);
+  };
+  const playPigeon = (pigeon: Player, pigeonIndex: number) => {
+    const homeBox = findHomeBox(pigeonIndex);
+    const temperament = pigeonIndex % 5;
+    if (temperament === 3) return nervous(pigeon, homeBox);
+    if (temperament === 4) return wanderer(pigeon, homeBox);
+    return greedy(pigeon, homeBox);
   };
   const seats = players.map((player) => seatPda(context.table, player.wallet.publicKey));
   const landRaisedSwat = async (player: Player) => {
@@ -325,8 +369,7 @@ const playRound = async (
       if (raised.ok) await landRaisedSwat(player);
     }
   };
-  const roles = pigeons.map((pigeon, index) => (index === 3 ? nervous(pigeon) : index === 4 ? wanderer(pigeon) : greedy(pigeon)));
-  await Promise.all([...roles, ...(whale === undefined ? [] : [whaleLoop(whale)])]);
+  await Promise.all([...pigeons.map(playPigeon), ...(whale === undefined ? [] : [whaleLoop(whale)])]);
   return { records, landings };
 };
 
@@ -346,7 +389,7 @@ const settleRound = async (context: Context, players: Player[], endTick: bigint)
   return success({ signature, computeUnits: execution.ok ? execution.value.computeUnits : null });
 };
 
-const cashOutAndWithdraw = async (context: Context, player: Player): Promise<Result<bigint>> => {
+const cashOutAndWithdraw = async (context: Context, player: Player): Promise<Result<string>> => {
   const seat = await fetchSeat(context.program, context.rollup, seatPda(context.table, player.wallet.publicKey));
   if (seat === null) return failure(`[cashOutAndWithdraw] ${player.name} seat missing`);
   if (seat.chips > 0n) {
@@ -369,10 +412,19 @@ const cashOutAndWithdraw = async (context: Context, player: Player): Promise<Res
     [context.admin, player.wallet],
   );
   if (!revoked.ok) log("cashOutAndWithdraw", `${player.name} session revoke failed: ${revoked.reason}`);
-  return success((await readTokenUnits(context.base, ata)) + (await readTokenUnits(context.rollup, ata)));
+  return success(player.name);
 };
 
-const runHeadlessRound = async (): Promise<Result<Record<string, unknown>>> => {
+const readTokensHeld = async (context: Context, players: Player[], escrow: PublicKey): Promise<bigint> => {
+  let total = await readTokenUnits(context.rollup, escrow);
+  for (const player of players) {
+    const ata = walletAta(player.wallet.publicKey, context.mint);
+    total += (await readTokenUnits(context.base, ata)) + (await readTokenUnits(context.rollup, ata));
+  }
+  return total;
+};
+
+const runHeadlessRound = async (options: RunOptions): Promise<Result<Record<string, unknown>>> => {
   const adminLoaded = loadAdmin();
   if (!adminLoaded.ok) return adminLoaded;
   const admin = adminLoaded.value;
@@ -389,7 +441,7 @@ const runHeadlessRound = async (): Promise<Result<Record<string, unknown>>> => {
 
   const runName = `run-${Date.now()}`;
   const players: Player[] = [];
-  for (let index = 0; index < PLAYER_COUNT; index += 1) {
+  for (let index = 0; index < options.playerCount; index += 1) {
     const wallet = createRunKeypair(runName, `player-${index}`);
     const sessionSigner = createRunKeypair(runName, `session-${index}`);
     if (!wallet.ok || !sessionSigner.ok) return failure("[runHeadlessRound] cannot create player keys");
@@ -418,9 +470,10 @@ const runHeadlessRound = async (): Promise<Result<Record<string, unknown>>> => {
     if (!outcome.ok) return outcome;
   }
   let tokensBefore = await readTokenUnits(rollup, escrow);
+  const stuckShuttles: string[] = [];
   // One deposit at a time: parallel delegateSpl deposits landing in one slot left a shuttle that devnet-us never merged (plan/01-facts.md section F).
   for (const player of players) {
-    const deposited = await depositToRollup(context, player);
+    const deposited = await depositToRollup(context, player, stuckShuttles);
     if (!deposited.ok) return deposited;
     tokensBefore += deposited.value;
   }
@@ -464,7 +517,7 @@ const runHeadlessRound = async (): Promise<Result<Record<string, unknown>>> => {
   liveTable.view = live.value;
   log("runHeadlessRound", `whale drawn in ${drawMs.toFixed(0)} ms, sandwich box ${live.value.sandwichBox}, end tick ${live.value.endTick}`);
 
-  const { records, landings } = await playRound(context, players, live.value, liveTable);
+  const { records, landings } = await playRound(context, players, live.value, liveTable, 1000 / options.actionsPerSecond);
   const settled = await settleRound(context, players, live.value.endTick);
   if (!settled.ok) return settled;
   const landedSwats = await readLandedSwats(context, landings);
@@ -477,11 +530,18 @@ const runHeadlessRound = async (): Promise<Result<Record<string, unknown>>> => {
   await Promise.all(seatListeners.map((listener) => rollup.removeAccountChangeListener(listener)));
 
   const withdrawn = await Promise.all(players.map((player) => cashOutAndWithdraw(context, player)));
-  let tokensAfter = await readTokenUnits(rollup, escrow);
   for (const outcome of withdrawn) {
     if (!outcome.ok) return outcome;
-    tokensAfter += outcome.value;
   }
+  const settleStartedAt = performance.now();
+  const tokensSettled = await pollUntil(
+    "token totals equal to the deposits",
+    async () => ((await readTokensHeld(context, players, escrow)) === tokensBefore ? tokensBefore : null),
+    TOKENS_SETTLE_MS,
+    TOKENS_POLL_MS,
+  );
+  const tokensAfter = tokensSettled.ok ? tokensSettled.value : await readTokensHeld(context, players, escrow);
+  const tokensSettleMs = Math.round(performance.now() - settleStartedAt);
   blockhashes.stop();
   const adminLamportsAfter = await readLamports(base, admin.publicKey);
 
@@ -492,19 +552,29 @@ const runHeadlessRound = async (): Promise<Result<Record<string, unknown>>> => {
   for (const record of refusedByRule) refusalCounts[record.error ?? "unknown"] = (refusalCounts[record.error ?? "unknown"] ?? 0) + 1;
   const isChipsConserved = chipsBefore === chipsAfter;
   const isTokensConserved = tokensBefore === tokensAfter;
+  const transportSuccessRate = records.length === 0 ? 0 : 1 - transportFailures.length / records.length;
+  const sentPerSecond = records.length / (PLAY_MS / 1000);
   const report = {
     runName,
     table: table.toBase58(),
     endpoint: ROLLUP_URL,
     validator: validator.toBase58(),
-    pass: isChipsConserved && isTokensConserved && escrowBacksChipsBefore && escrowAfterSettle === chipsAfter * afterSettle.chipUnits && transportFailures.length === 0,
+    pass: isChipsConserved && isTokensConserved && escrowBacksChipsBefore && escrowAfterSettle === chipsAfter * afterSettle.chipUnits && transportSuccessRate >= T2_SUCCESS_RATE,
+    load: {
+      players: options.playerCount,
+      actionsPerSecondPerPigeon: options.actionsPerSecond,
+      sentPerSecond: Math.round(sentPerSecond * 10) / 10,
+      transportSuccessRate: Math.round(transportSuccessRate * 10_000) / 10_000,
+      meetsT2: transportSuccessRate >= T2_SUCCESS_RATE,
+    },
     chips: { before: chipsBefore, after: chipsAfter, conserved: isChipsConserved },
     escrow: { beforeRound: escrowBefore, afterSettle: escrowAfterSettle, backsChipsBefore: escrowBacksChipsBefore },
-    tokens: { before: tokensBefore, after: tokensAfter, conserved: isTokensConserved },
+    tokens: { before: tokensBefore, after: tokensAfter, conserved: isTokensConserved, settleMs: tokensSettleMs },
     drawMs: Math.round(drawMs),
     lastResult: afterSettle.lastResult,
     swatCount: afterSettle.swatCount,
     stuns: stunTally,
+    stuckShuttles,
     actions: {
       sent: records.length,
       succeeded: succeeded.length,
@@ -525,9 +595,14 @@ const runHeadlessRound = async (): Promise<Result<Record<string, unknown>>> => {
   return success(report);
 };
 
-const outcome = await attempt(runHeadlessRound);
+const runOptions = readRunOptions(process.argv.slice(2));
+if (!runOptions.ok) {
+  log("main", runOptions.reason);
+  process.exit(1);
+}
+const outcome = await attempt(() => runHeadlessRound(runOptions.value));
 if (!outcome.ok || !outcome.value.ok) {
-  log("main", `IT-1 failed: ${outcome.ok ? (outcome.value.ok ? "" : outcome.value.reason) : outcome.reason}`);
+  log("main", `round failed: ${outcome.ok ? (outcome.value.ok ? "" : outcome.value.reason) : outcome.reason}`);
   process.exit(1);
 }
 log("main", JSON.stringify(outcome.value.value, (_key, value: unknown) => (typeof value === "bigint" ? value.toString() : value), 2));

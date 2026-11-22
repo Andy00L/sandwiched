@@ -82,7 +82,23 @@ export const isDelegatedOnRollup = async (account: PublicKey): Promise<boolean> 
 
 type BaseSend = { signature: string; confirmMs: number };
 
+const BASE_SEND_ATTEMPTS = 3;
+const EXPIRED_ERROR_NAME = "TransactionExpiredBlockheightExceededError";
+
 export const sendOnBase = async (
+  connection: Connection,
+  instructions: TransactionInstruction[],
+  signers: Keypair[],
+): Promise<Result<BaseSend>> => {
+  let outcome = await sendOnBaseOnce(connection, instructions, signers);
+  for (let attemptNumber = 2; attemptNumber <= BASE_SEND_ATTEMPTS && !outcome.ok && outcome.reason.includes(EXPIRED_ERROR_NAME); attemptNumber += 1) {
+    console.log(`[sendOnBase] expired before landing, sending again (attempt ${attemptNumber} of ${BASE_SEND_ATTEMPTS})`);
+    outcome = await sendOnBaseOnce(connection, instructions, signers);
+  }
+  return outcome;
+};
+
+const sendOnBaseOnce = async (
   connection: Connection,
   instructions: TransactionInstruction[],
   signers: Keypair[],

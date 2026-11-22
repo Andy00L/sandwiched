@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "it1": "bun run src/round.ts",
+    "ld1": "bun run src/round.ts --players 21 --rate 4",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
