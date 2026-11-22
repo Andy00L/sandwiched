@@ -42,9 +42,9 @@ pub struct Settlement {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SwatReport {
-    hit_count: u64,
-    dropped_crumbs: u64,
+pub struct SwatReport {
+    pub hit_count: u64,
+    pub dropped_crumbs: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -277,6 +277,20 @@ impl Round {
             return Err(RuleError::ChipsNotConserved);
         }
         Ok(Settlement { whale_crumbs, pigeon_crumbs })
+    }
+
+    pub fn apply_pending_swats(
+        &mut self,
+        pigeon: &mut Pigeon,
+        now_tick: u64,
+        timing: &Timing,
+    ) -> Result<SwatReport, RuleError> {
+        let mut next_round = *self;
+        let mut next_pigeon = *pigeon;
+        let report = next_round.apply_landed_swats(&mut next_pigeon, now_tick, timing)?;
+        *self = next_round;
+        *pigeon = next_pigeon;
+        Ok(report)
     }
 
     pub fn crumbs_in_play(&self, pigeons: &[Pigeon]) -> Option<u64> {

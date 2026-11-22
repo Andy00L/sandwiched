@@ -1,0 +1,12 @@
+[package]
+name = "sandwich-tune"
+version = "0.1.0"
+description = "Seeded bots over the Sandwich rules: records rounds as view events."
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+sandwich-rules = { path = "../sandwich-rules" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"

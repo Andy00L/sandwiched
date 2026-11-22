@@ -8,5 +8,5 @@ pub mod timing;
 pub use draw::{can_start_round, pick_default_box, pick_whale};
 pub use error::RuleError;
 pub use pigeon::{Pigeon, PigeonState};
-pub use round::{Hand, MoveOutcome, PeckOutcome, Round, Settlement, Swat};
+pub use round::{Hand, MoveOutcome, PeckOutcome, Round, Settlement, Swat, SwatReport};
 pub use timing::Timing;

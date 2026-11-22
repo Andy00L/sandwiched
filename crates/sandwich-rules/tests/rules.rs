@@ -1,7 +1,7 @@
 use sandwich_rules::constants::{CHIPS_PER_ANTE, MAX_SWITCHES, PERCHES_PER_BOX};
 use sandwich_rules::{
     can_start_round, pick_default_box, pick_whale, MoveOutcome, PeckOutcome, Pigeon, PigeonState,
-    Round, RuleError, Timing,
+    Round, RuleError, SwatReport, Timing,
 };
 
 const TICK_MS: u64 = 10;
@@ -327,4 +327,43 @@ fn the_draw_stays_in_range_for_every_byte_pattern() {
 #[test]
 fn a_zero_tick_length_is_refused() {
     assert_eq!(Timing::from_tick_ms(0), Err(RuleError::ZeroTickLength));
+}
+
+#[test]
+fn pending_swats_apply_at_their_landing_tick_once_and_only_to_pigeons_standing_there() {
+    let mut round = started_round();
+    let (mut perched, landed_tick) = perched_pigeon(&mut round, SANDWICH_BOX, 0);
+    let mut hovering = Pigeon::at_round_start();
+    let mut now_tick = landed_tick;
+    for _ in 0..5 {
+        round.peck(&mut perched, now_tick, &timing()).expect("a crumb");
+        now_tick += timing().peck_cooldown_ticks;
+    }
+    let swat = round.raise_hand(SANDWICH_BOX, now_tick, &timing()).expect("a free hand");
+    let no_hit = SwatReport { hit_count: 0, dropped_crumbs: 0 };
+    assert_eq!(
+        round.apply_pending_swats(&mut perched, swat.lands_tick - 1, &timing()),
+        Ok(no_hit)
+    );
+    assert_eq!(
+        round.apply_pending_swats(&mut perched, swat.lands_tick, &timing()),
+        Ok(SwatReport { hit_count: 1, dropped_crumbs: 3 })
+    );
+    assert_eq!(
+        round.apply_pending_swats(&mut hovering, swat.lands_tick, &timing()),
+        Ok(no_hit)
+    );
+    assert_eq!(
+        round.apply_pending_swats(&mut perched, swat.lands_tick + 1, &timing()),
+        Ok(no_hit)
+    );
+    assert_eq!(perched.beak_crumbs, 2);
+    assert_eq!(round.loose_crumbs[usize::from(SANDWICH_BOX)], 3);
+    assert_eq!(
+        perched.state,
+        PigeonState::Stunned {
+            box_index: SANDWICH_BOX,
+            until_tick: swat.lands_tick + timing().swat_stun_ticks
+        }
+    );
 }
