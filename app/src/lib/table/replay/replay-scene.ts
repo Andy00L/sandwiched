@@ -5,7 +5,7 @@ import { FlapSpring } from "papercraft/lib/paperkit-3d.js";
 import type { HandRaisedEvent, RecordedRound } from "../../game/round-events";
 import { viewStateAt } from "../../game/view-state";
 import type { RoundViewState } from "../../game/view-state";
-import { HOVER_HEIGHT_UNITS, REVEAL_LID_STAGGER_S } from "../motion/motion-tokens";
+import { REVEAL_LID_STAGGER_S } from "../motion/motion-tokens";
 import {
   boxHopRad,
   cameraDropUnits,
@@ -33,11 +33,12 @@ import type { ArmRig } from "./arm-rig";
 import { buildFeatherPool } from "./feathers";
 import { buildFlipperShadow } from "./flipper-shadow";
 import { createPigeonActor, printPigeonVariant } from "./pigeon-actor";
+import { toPigeonPose } from "./pigeon-pose";
 import type { PigeonActor, PigeonPose } from "./pigeon-actor";
 import { BOX_ROW_DECK_Z, boxAlong, hoverSpot, perchSpot } from "./perches";
 import type { PerchSpot } from "./perches";
 import { createRoundDirector, PERCH_SLOT_COUNT } from "./round-director";
-import type { FlightEnd, SeatPose } from "./round-director";
+import type { SeatPose } from "./round-director";
 import { HAND_COCK_RAD, handCockAmount, makeRaisedHandPosition, slamHandPosition } from "./slam";
 import type { HandPath } from "./slam";
 import { createMoodGovernor, crowdedGlance, glanceTowardBox } from "./whale-mood";
@@ -170,10 +171,6 @@ function buildRevealBoxes(harness: Harness, deck: THREE.Object3D, boxes: readonl
   });
 }
 
-function heightOf(end: FlightEnd): number {
-  return end === "hover" ? HOVER_HEIGHT_UNITS : 0;
-}
-
 function buildArmSlam(rig: ArmRig): ArmSlam {
   return {
     rig,
@@ -243,35 +240,6 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     deck.updateWorldMatrix(true, false);
     whale.group.updateWorldMatrix(true, false);
     return whale.group.worldToLocal(deck.localToWorld(out.copy(pointInDeck)));
-  }
-
-  function perchSpotOf(end: FlightEnd, hover: PerchSpot): PerchSpot {
-    return end === "hover" ? hover : (perchSpots[end.box]?.[end.slot % PERCH_SLOT_COUNT] ?? hover);
-  }
-
-  function toPigeonPose(pose: SeatPose, hover: PerchSpot): PigeonPose {
-    switch (pose.kind) {
-      case "hidden":
-        return pose;
-      case "hovering":
-        return { kind: "hovering", spot: hover };
-      case "drawn":
-        return { kind: "folding", spot: hover, sinceTick: pose.sinceTick };
-      case "flying":
-        return {
-          kind: "flying",
-          from: perchSpotOf(pose.from, hover),
-          to: perchSpotOf(pose.to, hover),
-          fromHeight: heightOf(pose.from),
-          toHeight: heightOf(pose.to),
-          startTick: pose.startTick,
-          landsTick: pose.landsTick,
-        };
-      case "perched":
-        return { kind: "perched", spot: perchSpotOf(pose.at, hover) };
-      case "stunned":
-        return { kind: "stunned", spot: perchSpotOf(pose.at, hover), cause: pose.cause, sinceTick: pose.sinceTick, untilTick: pose.untilTick };
-    }
   }
 
   function sortNearestFirst(reveals: readonly RevealBox[]): RevealBox[] {
@@ -507,7 +475,7 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
       const seatPose = director.poseOf(entry.seat, presentTick);
       if (seatPose !== entry.shownSeatPose) {
         entry.shownSeatPose = seatPose;
-        entry.shownPigeonPose = toPigeonPose(seatPose, entry.hover);
+        entry.shownPigeonPose = toPigeonPose(seatPose, entry.hover, perchSpots);
       }
       entry.actor.update(entry.shownPigeonPose, presentTick, tickMs, presentDt);
     }
