@@ -14,7 +14,17 @@ In crypto, a sandwich attack is a bot taking a few cents from your trade. This i
 
 ## Status
 
-Work started on 2026-11-21. Nothing is playable yet. This file will list the play link, the measured results and the setup commands as they exist.
+Work started on 2026-11-21. Nothing is playable yet. This file will list the play link and the measured results as they exist.
+
+## Develop
+
+| Part | Folder | Check |
+|---|---|---|
+| Game rules, pure Rust | `crates/sandwich-rules/` | `cargo test --workspace` |
+| On-chain program (Anchor, MagicBlock Ephemeral Rollups) | `programs/sandwich/` | `cargo clippy --workspace --all-targets -- -D warnings` |
+| Web app (Next.js, Bun) | `app/` | `bun install`, then `bun run typecheck`, `bun run lint`, `bun run test` |
+
+CI runs every check above on each push to `main`.
 
 ## Licence
 
