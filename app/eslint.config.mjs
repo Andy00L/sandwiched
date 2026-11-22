@@ -36,6 +36,21 @@ const SCALE_ONLY_IN_VERBS = [
   },
 ];
 
+const REQUESTS_THROUGH_RPC = [
+  {
+    selector: "CallExpression[callee.name='fetch']",
+    message: "Every request needs a deadline: use fetchWithTimeout from src/lib/chain/rpc.ts.",
+  },
+  {
+    selector: "NewExpression[callee.name='Connection']",
+    message: "Every RPC call needs a deadline: use createRpcConnection from src/lib/chain/rpc.ts.",
+  },
+  {
+    selector: "CallExpression[callee.property.name='serialize']:not(CallExpression[callee.name=/^attempt(Sync)?$/] CallExpression)",
+    message: "Transaction.serialize throws on a missing signer or an oversized transaction: call it inside attemptSync (src/lib/chain/result.ts) or use serializeTransaction.",
+  },
+];
+
 const PER_FRAME_FUNCTION = ":matches(FunctionDeclaration, FunctionExpression)[id.name!=/^(build|create|print|make)[A-Z]/]";
 const STEP_CALLBACK = "CallExpression[callee.property.name='onStep']";
 const PER_FRAME_ALLOCATION_MESSAGE =
@@ -77,6 +92,13 @@ export default defineConfig([
     files: ["src/lib/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-syntax": ["error", ...BANNED_IN_LIB],
+    },
+  },
+  {
+    files: ["src/lib/chain/**/*.ts", "src/lib/game/**/*.ts", "src/app/api/**/*.ts", "scripts/**/*.ts"],
+    ignores: ["**/*.test.ts", "src/lib/chain/rpc.ts"],
+    rules: {
+      "no-restricted-syntax": ["error", ...BANNED_IN_LIB, ...REQUESTS_THROUGH_RPC],
     },
   },
   {

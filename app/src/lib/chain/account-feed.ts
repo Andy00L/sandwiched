@@ -2,6 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { Buffer } from "buffer";
 import { RPC_REQUEST_TIMEOUT_MS, SLOT_REGRESSION_SLOTS } from "./config";
 import { type Result, attempt, attemptSync, failure, success } from "./result";
+import { fetchWithTimeout } from "./rpc";
 
 export type FeedAccount = { owner: PublicKey; data: Buffer };
 export type AccountChange = { address: PublicKey; slot: number; account: FeedAccount | null };
@@ -92,7 +93,6 @@ const readAccounts = async (fetchJson: FeedFetch, rpcUrl: string, keys: string[]
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [chunk, { encoding: "base64", commitment: "processed" }] }),
-        signal: AbortSignal.timeout(RPC_REQUEST_TIMEOUT_MS),
       });
       return response.json();
     });
@@ -118,14 +118,14 @@ const openBrowserSocket: OpenFeedSocket = (url, handlers) => {
   return { send: (text) => socket.send(text), close: () => socket.close() };
 };
 
-const fetchWithGlobal: FeedFetch = (url, init) => fetch(url, init);
+const fetchWithRpcTimeout: FeedFetch = (url, init) => fetchWithTimeout(url, init, RPC_REQUEST_TIMEOUT_MS);
 
 const readBackoffMs = (attemptIndex: number, baseMs: number, maxMs: number): number => Math.min(maxMs, baseMs * 2 ** attemptIndex);
 
 export const createAccountFeed = (options: AccountFeedOptions): AccountFeed => {
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const openSocket = options.openSocket ?? openBrowserSocket;
-  const fetchJson = options.fetch ?? fetchWithGlobal;
+  const fetchJson = options.fetch ?? fetchWithRpcTimeout;
   const watchers = new Map<string, Watcher>();
   const pendingSubscriptions = new Map<number, Watcher>();
   const subscriptionOwners = new Map<number, Watcher>();

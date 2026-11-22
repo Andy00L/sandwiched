@@ -11,6 +11,7 @@ import { Buffer } from "buffer";
 import { BASE_COMPUTE_UNITS, BASE_CONFIRM_TIMEOUT_MS, RPC_REQUEST_TIMEOUT_MS, SPONSOR_REQUEST_TIMEOUT_MS } from "./config";
 import { nameProgramError, readProgramErrorCode } from "./errors";
 import { type Failure, type Result, attempt, attemptSync, failure, raceDeadline, success } from "./result";
+import { fetchWithTimeout } from "./rpc";
 
 export type TransactionSigner = {
   publicKey: PublicKey;
@@ -35,12 +36,11 @@ type JsonRpcResponse<Value> = { result?: Value; error?: JsonRpcError };
 
 const postJsonRpc = async <Value>(url: string, method: string, params: unknown[]): Promise<Result<JsonRpcResponse<Value>>> => {
   const response = await attempt(() =>
-    fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      signal: AbortSignal.timeout(RPC_REQUEST_TIMEOUT_MS),
-    }),
+    fetchWithTimeout(
+      url,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) },
+      RPC_REQUEST_TIMEOUT_MS,
+    ),
   );
   if (!response.ok) return failure(`[postJsonRpc] ${method} transport: ${response.reason}`);
   if (!response.value.ok) return failure(`[postJsonRpc] ${method} HTTP ${response.value.status}`);
@@ -214,12 +214,11 @@ const requestSponsorSignature = async (routeUrl: string, transaction: Transactio
   const serialized = serializeTransaction(transaction, false);
   if (!serialized.ok) return serialized;
   const response = await attempt(() =>
-    fetch(routeUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ transaction: serialized.value.toString("base64") }),
-      signal: AbortSignal.timeout(SPONSOR_REQUEST_TIMEOUT_MS),
-    }),
+    fetchWithTimeout(
+      routeUrl,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ transaction: serialized.value.toString("base64") }) },
+      SPONSOR_REQUEST_TIMEOUT_MS,
+    ),
   );
   if (!response.ok) return failure(`[requestSponsorSignature] transport: ${response.reason}`);
   const body = await attempt((): Promise<unknown> => response.value.json());

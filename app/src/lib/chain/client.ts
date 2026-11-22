@@ -3,7 +3,7 @@ import { Buffer } from "buffer";
 import { BASE_RPC_URL, BLOCKHASH_REFRESH_MS, ROLLUP_RPC_URL, ROLLUP_WS_URL, RPC_REQUEST_TIMEOUT_MS } from "./config";
 import { type ChainPrograms, createChainPrograms } from "./program";
 import { type Result, attempt, attemptSync, failure, success } from "./result";
-import { createRpcConnection } from "./rpc";
+import { createRpcConnection, fetchWithTimeout } from "./rpc";
 import { type BlockhashCache, type FeePayment, createBlockhashCache } from "./transport";
 
 export type ChainClient = {
@@ -36,7 +36,7 @@ export const createChainClient = (feePayment: FeePayment): ChainClient => {
 export type SponsorStatus = { sponsor: PublicKey; isAccepting: boolean };
 
 export const fetchSponsorStatus = async (routeUrl: string): Promise<Result<SponsorStatus>> => {
-  const response = await attempt(() => fetch(routeUrl, { method: "GET", signal: AbortSignal.timeout(RPC_REQUEST_TIMEOUT_MS) }));
+  const response = await attempt(() => fetchWithTimeout(routeUrl, { method: "GET" }, RPC_REQUEST_TIMEOUT_MS));
   if (!response.ok) return failure(`[fetchSponsorStatus] transport: ${response.reason}`);
   const body = await attempt((): Promise<unknown> => response.value.json());
   if (!body.ok || typeof body.value !== "object" || body.value === null) return failure("[fetchSponsorStatus] no JSON body");

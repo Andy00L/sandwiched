@@ -5,12 +5,13 @@ import { type AccountFeed, type FeedStatus, createAccountFeed } from "../src/lib
 import { type SeatSnapshot, type TableSnapshot, fetchSeat, fetchTable, watchSeat, watchTable } from "../src/lib/chain/accounts";
 import { findSeatAddress, findWalletTokenAddress } from "../src/lib/chain/addresses";
 import { createChainClient, createSponsoredFeePayment, fetchSponsorStatus } from "../src/lib/chain/client";
-import { ROLLUP_RPC_URL, ROLLUP_WS_URL, SPONSOR_ROUTE_PATH } from "../src/lib/chain/config";
+import { ROLLUP_RPC_URL, ROLLUP_WS_URL, SPONSOR_REQUEST_TIMEOUT_MS, SPONSOR_ROUTE_PATH } from "../src/lib/chain/config";
 import { createDepositChain, createDepositQueue } from "../src/lib/chain/deposits";
 import { loadGuestKey } from "../src/lib/chain/guest-key";
 import { type KeyStore, createMemoryKeyStore } from "../src/lib/chain/key-store";
 import { claimTestUsdc, createSeatActions, sitAtTable } from "../src/lib/chain/player";
 import { type Result, attempt, attemptSync, failure, pollUntil, success } from "../src/lib/chain/result";
+import { fetchWithTimeout } from "../src/lib/chain/rpc";
 import { createSessionKeeper } from "../src/lib/chain/session";
 import { type RollupAck, createKeypairSigner, readTokenUnits } from "../src/lib/chain/transport";
 
@@ -67,9 +68,11 @@ const checkRefusal = async (routeUrl: string, sponsor: PublicKey): Promise<Resul
   const drain = new Transaction({ feePayer: sponsor, recentBlockhash: Keypair.generate().publicKey.toBase58() }).add(
     SystemProgram.transfer({ fromPubkey: sponsor, toPubkey: Keypair.generate().publicKey, lamports: 100_000_000 }),
   );
-  const encoded = Buffer.from(drain.serialize({ requireAllSignatures: false, verifySignatures: false })).toString("base64");
+  const serialized = attemptSync(() => drain.serialize({ requireAllSignatures: false, verifySignatures: false }));
+  if (!serialized.ok) return serialized;
+  const encoded = Buffer.from(serialized.value).toString("base64");
   const response = await attempt(() =>
-    fetch(routeUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ transaction: encoded }) }),
+    fetchWithTimeout(routeUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ transaction: encoded }) }, SPONSOR_REQUEST_TIMEOUT_MS),
   );
   if (!response.ok) return response;
   const body = await response.value.text();
