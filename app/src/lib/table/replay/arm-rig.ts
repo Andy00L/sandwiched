@@ -2,6 +2,7 @@ import * as THREE from "three";
 
 export const UPPER_ARM_UNITS = 6.4;
 export const FOREARM_UNITS = 7.2;
+const FOREARM_LAYER_UNITS = 0.25;
 const REACH_MARGIN_UNITS = 0.05;
 
 export interface ArmRig {
@@ -36,6 +37,6 @@ export function poseArm(rig: ArmRig, hand: THREE.Vector3, towardCamera: THREE.Ve
   const reachedHand = rig.shoulder.clone().addScaledVector(direction, reach);
   rig.upper.position.copy(rig.shoulder);
   rig.upper.quaternion.copy(orientAlong(elbow.clone().sub(rig.shoulder), towardCamera));
-  rig.fore.position.copy(elbow);
+  rig.fore.position.copy(elbow).addScaledVector(towardCamera, FOREARM_LAYER_UNITS);
   rig.fore.quaternion.copy(orientAlong(reachedHand.sub(elbow), towardCamera));
 }

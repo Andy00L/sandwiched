@@ -41,6 +41,8 @@ import { buildFlowerBed, buildHedge, buildLampPost, buildLitterBin, buildParkBen
 import { sittingPigeonCard, standingPigeonCard } from "./pieces/pigeon";
 import { buildPicnicTable } from "./pieces/table";
 import { buildWhale, buildWhaleFluke } from "./pieces/whale";
+import { WHALE_MOODS } from "./pieces/whale-face";
+import type { WhaleFace } from "./pieces/whale-face";
 import { BOX_ROW_DECK_Z, BOX_SPACING_UNITS, boxAlong } from "./replay/perches";
 import { loadRecordedRound } from "./replay/recorded-rounds";
 import { buildReplayScene } from "./replay/replay-scene";
@@ -105,8 +107,20 @@ function buildPark(harness: Harness, mode: SceneMode): void {
     harness.popup(...standingPigeonCard("gary", "left"), { parent: deck, x: 5.3, z: BOX_ROW_DECK_Z + 0.4, yaw: pigeonYaw, order: boxOrder + 0.8 });
     harness.popup(...standingPigeonCard("linda", "right"), { parent: deck, x: -BOX_SPACING_UNITS + 5.2, z: BOX_ROW_DECK_Z - 0.6, yaw: pigeonYaw, order: boxOrder + 0.9 });
     buildCrumbScatter(harness, deck, 3.6, BOX_ROW_DECK_Z + 1.4, boxOrder + 1.2);
+    poseFaceWhenAsked(harness, whaleModel.face);
   }
   harness.setHero(whaleModel.whale);
+}
+
+function poseFaceWhenAsked(harness: Harness, face: WhaleFace): void {
+  const requested = new URLSearchParams(location.search).get("face");
+  const mood = WHALE_MOODS.find((candidate) => candidate === requested);
+  if (!mood) return;
+  harness.onRestart(() => face.reset());
+  harness.onStep((timeSeconds, dtSeconds) => {
+    face.setMood(mood, "left");
+    face.step(dtSeconds, timeSeconds * 1000);
+  });
 }
 
 async function readSceneMode(): Promise<SceneMode> {

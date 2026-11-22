@@ -22,6 +22,7 @@ import type { PerchSpot } from "./perches";
 import { createRoundDirector } from "./round-director";
 import type { FlightEnd, SeatPose } from "./round-director";
 import { raisedHandPosition, slamHandPosition } from "./slam";
+import { createMoodGovernor, crowdedGlance } from "./whale-mood";
 
 const REPLAY_LEAD_S = 2.5;
 const WHISTLE_S = 0.4;
@@ -29,6 +30,8 @@ const CRUMB_BITS_PER_BOX = 16;
 const CRUMB_BITS_COUNTED_ONE_BY_ONE = 12;
 const CRUMBS_PER_LATER_BIT = 5;
 const REVEAL_PROP_DELAY_S = 0.08;
+const ANGRY_AFTER_LANDING_MS = 400;
+const SPOUT_MIN_HITS = 3;
 
 interface CrumbBit {
   piece: PlacedPiece;
@@ -61,10 +64,13 @@ function crumbBitCount(looseCrumbs: number): number {
   return Math.min(CRUMB_BITS_PER_BOX, Math.max(0, bits));
 }
 
-function biteStageAtSettlement(round: RecordedRound): number {
+function startingPotOf(round: RecordedRound): number {
   const draw = round.events.find((event) => event.kind === "whaleDrawn");
+  return draw ? viewStateAt(round, draw.tick).pot : 0;
+}
+
+function biteStageAtSettlement(round: RecordedRound, startingPot: number): number {
   const lastTick = round.events.at(-1)?.tick ?? 0;
-  const startingPot = viewStateAt(round, draw?.tick ?? lastTick).pot;
   if (startingPot <= 0) return 0;
   const eatenShare = (startingPot - viewStateAt(round, lastTick).pot) / startingPot;
   return Math.min(SANDWICH_BITE_STAGES, Math.max(0, Math.floor(eatenShare * SANDWICH_BITE_STAGES)));
@@ -90,11 +96,11 @@ function buildCrumbBits(harness: Harness, deck: THREE.Object3D, boxCount: number
   });
 }
 
-function buildRevealBoxes(harness: Harness, deck: THREE.Object3D, boxes: readonly LunchboxModel[], round: RecordedRound, order: number): RevealBox[] {
+function buildRevealBoxes(harness: Harness, deck: THREE.Object3D, boxes: readonly LunchboxModel[], round: RecordedRound, startingPot: number, order: number): RevealBox[] {
   const sandwichBox = round.events.find((event) => event.kind === "whaleDrawn")?.sandwichBox ?? null;
   const [mothOutline, paintMoth] = mothCard();
   const mothMaterials = harness.printed(mothOutline, paintMoth);
-  const [sandwichOutline, paintSandwich] = sandwichCard(biteStageAtSettlement(round));
+  const [sandwichOutline, paintSandwich] = sandwichCard(biteStageAtSettlement(round, startingPot));
   return boxes.map((box, boxIndex) => {
     const placement = { parent: deck, x: boxAlong(boxIndex, boxes.length), z: BOX_ROW_DECK_Z - LUNCHBOX_DEPTH_UNITS * 0.78, yaw: 0, order: order + boxIndex * 0.05 };
     const prop =
@@ -154,7 +160,10 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
   });
   const actorBySeat = new Map(actors.map((entry) => [entry.seat, entry.actor]));
   const crumbBits = buildCrumbBits(harness, deck, boxCount, order + 2);
-  const revealBoxes = buildRevealBoxes(harness, deck, boxes, round, order + 3);
+  const startingPot = startingPotOf(round);
+  const revealBoxes = buildRevealBoxes(harness, deck, boxes, round, startingPot, order + 3);
+  const moodGovernor = createMoodGovernor();
+  const angryTicksAfterLanding = ANGRY_AFTER_LANDING_MS / tickMs;
   const settledTick = round.events.findLast((event) => event.kind === "settled")?.tick ?? Number.POSITIVE_INFINITY;
   const revealStartTick = settledTick + (WHISTLE_S * 1000) / tickMs;
   const lidStaggerTicks = (REVEAL_LID_STAGGER_S * 1000) / tickMs;
@@ -220,8 +229,18 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     });
   }
 
+  function actFace(nowTick: number, nowMs: number, dtSeconds: number): void {
+    const view = director.view();
+    const isAngry = director.latestRaises().some((raise) => nowTick >= raise.tick && nowTick < raise.landsTick + angryTicksAfterLanding);
+    const potShare = startingPot > 0 && view.phase !== "lobby" ? view.pot / startingPot : 1;
+    whale.face.setMood(isAngry ? "angry" : moodGovernor.moodAt(potShare, nowMs), crowdedGlance(view, boxCount));
+    whale.face.step(dtSeconds, nowMs);
+  }
+
   harness.onRestart(() => {
     director.reset();
+    moodGovernor.reset();
+    whale.face.reset();
     revealOrder = null;
     for (const { actor } of actors) actor.reset();
     for (const bits of crumbBits) for (const bit of bits) bit.isShown = false;
@@ -236,9 +255,11 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     const nowTick = ((timeSeconds - REPLAY_LEAD_S) * 1000) / tickMs;
     for (const event of director.advanceTo(Math.floor(nowTick))) {
       if (event.kind === "pecked" && event.outcome !== "emptyBox") actorBySeat.get(event.seat)?.peck(event.tick);
+      if (event.kind === "swatLanded" && event.hits.length >= SPOUT_MIN_HITS) whale.face.popSpout(timeSeconds * 1000);
     }
     for (const { seat, actor, hover } of actors) actor.update(toPigeonPose(director.poseOf(seat, nowTick), hover, boxCount), nowTick, tickMs, dtSeconds);
     poseArms(nowTick);
+    actFace(nowTick, timeSeconds * 1000, dtSeconds);
     showCrumbs(director.view().looseCrumbs);
     playReveal(nowTick, dtSeconds);
   });
