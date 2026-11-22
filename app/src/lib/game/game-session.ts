@@ -44,11 +44,11 @@ export const formatUsdc = (units: bigint): string => {
 
 type SignpostSpot = { x: number; z: number };
 
-const PRACTICE_SPOT: SignpostSpot = { x: 21, z: 1 };
+const PRACTICE_SPOT: SignpostSpot = { x: 16, z: -13 };
 const PUBLIC_SPOTS: readonly SignpostSpot[] = [
-  { x: -25, z: -2 },
-  { x: -27, z: -13 },
-  { x: 28, z: -12 },
+  { x: -21, z: -5 },
+  { x: -20, z: -22 },
+  { x: 35, z: -13 },
 ];
 const PUBLIC_BOARDS = [PALETTE.creamCore, PALETTE.creamCore, PALETTE.creamCore];
 
@@ -109,7 +109,12 @@ export function createGameSession(): GameSession {
       if (!isLive) switchable.switchTo(createReplaySource(loaded.round, REPLAY_LEAD_S));
     });
     void import("../table/scene").then(({ buildGameScene }) =>
-      buildGameScene({ source: switchable.source, onClick: controller.clickTable, signposts: listSignposts(controller) }),
+      buildGameScene({
+        source: switchable.source,
+        onClick: controller.clickTable,
+        signposts: listSignposts(controller),
+        readShot: () => (controller.getSnapshot().flow.kind === "home" ? "overview" : "table"),
+      }),
     );
   };
   return { controller, start };

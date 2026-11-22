@@ -129,8 +129,18 @@ export interface PlacedPiece extends HingeHandle {
   z: number;
 }
 
+export interface HarnessView {
+  yaw: number;
+  pitch: number;
+  dist: number;
+  fov: number;
+  tyaw: number;
+  tpitch: number;
+}
+
 export interface Harness {
   flags: { TEST: boolean; MOOD: string; WALK: boolean; ROAM: boolean; DIAG: string | null };
+  view: HarnessView;
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;

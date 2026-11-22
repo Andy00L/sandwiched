@@ -59,6 +59,8 @@ import { loadRecordedRound } from "./replay/recorded-rounds";
 import { buildReplayScene, REPLAY_LEAD_S } from "./replay/replay-scene";
 import { listenForTableClicks } from "./stage/box-picking";
 import { type SignpostLook, buildSignpost } from "./pieces/signpost";
+import { buildTitleBanner } from "./pieces/title-banner";
+import { type CameraShot, directCameraShots } from "./stage/camera-shots";
 import { recordFrameTimes } from "./stage/frame-recorder";
 import { buildParkLife } from "./stage/park-life";
 import { printParkGround } from "./stage/park-ground";
@@ -74,7 +76,15 @@ type SceneMode = { kind: "sample" } | { kind: "rounds"; source: RoundSource; onC
 
 export type SignpostPlacement = { x: number; z: number; look: SignpostLook; canPick: () => boolean; onPick: () => void };
 
-export type GameScenePorts = { source: RoundSource; onClick: (target: ClickTarget) => void; signposts: readonly SignpostPlacement[] };
+export type GameScenePorts = {
+  source: RoundSource;
+  onClick: (target: ClickTarget) => void;
+  signposts: readonly SignpostPlacement[];
+  readShot: () => CameraShot;
+};
+
+const TITLE_BANNER_SPOT = { x: 1, z: -31, halfWidth: 12 };
+
 
 function buildTestCards(harness: Harness): void {
   const [outline, paint] = sittingPigeonCard();
@@ -211,14 +221,14 @@ async function readSceneMode(): Promise<SceneMode> {
 }
 
 export async function buildStageScene(): Promise<void> {
-  buildScene(await readSceneMode(), []);
+  buildScene(await readSceneMode(), [], null);
 }
 
 export function buildGameScene(ports: GameScenePorts): void {
-  buildScene({ kind: "rounds", source: ports.source, onClick: ports.onClick }, ports.signposts);
+  buildScene({ kind: "rounds", source: ports.source, onClick: ports.onClick }, ports.signposts, ports.readShot);
 }
 
-function buildScene(mode: SceneMode, signposts: readonly SignpostPlacement[]): void {
+function buildScene(mode: SceneMode, signposts: readonly SignpostPlacement[], readShot: (() => CameraShot) | null): void {
   const onClick = mode.kind === "rounds" ? mode.onClick : null;
   const quality = storedQuality();
   const harness = createHarness({
@@ -236,6 +246,7 @@ function buildScene(mode: SceneMode, signposts: readonly SignpostPlacement[]): v
   if (harness.flags.TEST) buildTestCards(harness);
   else {
     const boxes = buildPark(harness, mode);
+    if (signposts.length > 0) buildTitleBanner(harness, TITLE_BANNER_SPOT.x, TITLE_BANNER_SPOT.z, TITLE_BANNER_SPOT.halfWidth);
     const pickable = signposts.map((placement) => ({
       node: buildSignpost(harness, placement.x, placement.z, placement.look).group,
       canPick: placement.canPick,
@@ -245,6 +256,7 @@ function buildScene(mode: SceneMode, signposts: readonly SignpostPlacement[]): v
   }
   trimHiddenBacksOnceRisen(harness);
   harness.start();
+  if (readShot !== null) directCameraShots(harness, readShot);
   probeQualityTier(harness);
   holdAtRequestedTime();
   reportFrameTimesWhenAsked(harness);
