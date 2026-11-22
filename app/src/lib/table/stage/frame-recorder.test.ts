@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { summarizeFrameGaps } from "./frame-recorder";
+import { summarizeFrameGaps, summarizeMainThread } from "./frame-recorder";
 
 describe("summarizeFrameGaps", () => {
   test("reports the median and the 1% low of the frame gaps", () => {
@@ -13,5 +13,11 @@ describe("summarizeFrameGaps", () => {
 
   test("ignores gaps that are not positive and returns null when none remain", () => {
     expect(summarizeFrameGaps([0, -3, Number.NaN])).toBeNull();
+  });
+
+  test("summarizes the main-thread cost of step and render, or null when the harness gave none", () => {
+    const costs = Array.from({ length: 100 }, (_unused, index) => ({ stepMs: index < 95 ? 1 : 9, renderMs: 3 }));
+    expect(summarizeMainThread(costs)).toEqual({ stepMedianMs: 1, stepP95Ms: 9, renderMedianMs: 3, renderP95Ms: 3 });
+    expect(summarizeFrameGaps([16.7])?.mainThread).toBeNull();
   });
 });

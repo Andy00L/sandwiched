@@ -911,6 +911,8 @@ function linearColor(hex) { const c = new THREE.Color(hex); return new THREE.Vec
  * Haze, vignette and shadow tint are art-directed in DISPLAY space, so the hex you choose is the colour you see.
  * Set post.view = 1 to see the circle of confusion (red = far blur, green = near blur) while tuning.
  */
+const POST_SCRATCH = { projected: new THREE.Vector3(), inView: new THREE.Vector3(), forward: new THREE.Vector3() };   // render() runs every frame: no allocation there
+
 export class PaperPost {
   constructor(renderer, scene, camera, opts = {}) {
     this.renderer = renderer; this.scene = scene; this.camera = camera;
@@ -982,10 +984,10 @@ export class PaperPost {
     const { renderer, scene, camera, o } = this;
     const u = this.dof.uniforms, g = this.grade.uniforms, k = (this.S || 1080) / 1080 * (this.magnify ?? 1), bs = this.bandScale ?? 1;
     camera.updateMatrixWorld();
-    const p = this.focus.clone().project(camera);
-    const fz = Math.max(0.01, -this.focus.clone().applyMatrix4(camera.matrixWorldInverse).z);
+    const p = POST_SCRATCH.projected.copy(this.focus).project(camera);
+    const fz = Math.max(0.01, -POST_SCRATCH.inView.copy(this.focus).applyMatrix4(camera.matrixWorldInverse).z);
     const fovY = THREE.MathUtils.degToRad(camera.fov);
-    const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+    const fwd = camera.getWorldDirection(POST_SCRATCH.forward);
     const pitch = Math.max(0.05, Math.asin(Math.min(0.999, -fwd.y)));
     u.uKD.value = Math.min(9, 1 / (fovY * (Math.cos(pitch) / Math.sin(pitch))));
     u.uNear.value = camera.near; u.uFar.value = camera.far;

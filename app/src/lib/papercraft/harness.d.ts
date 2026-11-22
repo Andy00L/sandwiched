@@ -43,6 +43,7 @@ export interface LensOptions {
   grain?: number;
   chroma?: number;
   sharpen?: number;
+  taps?: number;
 }
 
 export interface LightOptions {
@@ -61,6 +62,8 @@ export interface LightOptions {
   leak?: string;
   softness?: number;
   maxPenumbra?: number;
+  blockerSamples?: number;
+  filterSamples?: number;
   target?: THREE.Vector3;
 }
 
@@ -144,10 +147,11 @@ export interface Harness {
   onRestart(hook: () => void): void;
   setHero(handle: PlacedPiece, options?: { turn?: "yaw" | "flip" }): void;
   start(): void;
-  setRenderScale(scale: number): void;
+  setQuality(quality: { renderScale?: number; shadowMapSize?: number; dofTaps?: number }): void;
   focusOn(point: THREE.Vector3 | null): void;
   castShadowOnly(object: THREE.Object3D): void;
   keyLight: THREE.DirectionalLight | null;
+  readonly frameCost: { readonly stepMs: number; readonly renderMs: number };
 }
 
 export function createHarness(options?: HarnessOptions): Harness;

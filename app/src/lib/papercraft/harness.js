@@ -460,7 +460,7 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
   const castShadowOnly = (object) => object.traverse((o) => { o.layers.set(SHADOW_ONLY_LAYER); o.castShadow = true; o.receiveShadow = false; });
   let focusOverride = null; const focusOverrideAt = new THREE.Vector3();
   const H = { THREE, P2, flags, renderer, scene, camera, paper, view, target, walk, hinges, spots, bounds, frame, heroHeight, groundAt, stack, dome,
-    printGround, popup, printed, cardOpts, inFrame, inReach, walkArea, sharpAt, lamp, glowing, hero: null, heroStride: null, stepHooks: [], onStep: (fn) => H.stepHooks.push(fn), restartHooks: [], onRestart: (fn) => H.restartHooks.push(fn), heroTurn: 'yaw', setHero: (h, { stride = null, turn = 'yaw' } = {}) => { H.hero = h; H.heroStride = stride; H.heroTurn = turn; }, start, setRenderScale: (scale) => { renderScaleNow = clampScale(scale); }, focusOn: (point) => { focusOverride = point ? focusOverrideAt.copy(point) : null; }, castShadowOnly, keyLight: null };
+    printGround, popup, printed, cardOpts, inFrame, inReach, walkArea, sharpAt, lamp, glowing, hero: null, heroStride: null, stepHooks: [], onStep: (fn) => H.stepHooks.push(fn), restartHooks: [], onRestart: (fn) => H.restartHooks.push(fn), heroTurn: 'yaw', setHero: (h, { stride = null, turn = 'yaw' } = {}) => { H.hero = h; H.heroStride = stride; H.heroTurn = turn; }, start, setQuality: ({ renderScale: scale }) => { if (scale) renderScaleNow = clampScale(scale); }, focusOn: (point) => { focusOverride = point ? focusOverrideAt.copy(point) : null; }, castShadowOnly, keyLight: null, frameCost: { stepMs: 0, renderMs: 0 } };
 
   // ---- start: light, lens, choreography, input, walking, the loop and the capture hook -------------------------------
   function start() {
@@ -471,8 +471,18 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
     // camera sees them (a key from behind the camera hides every shadow)
     const lights = paperLights(scene, L);
     PAPER_LIGHT.leak.value.set(L.leak);      // the world's shadow colour (light.leak), more saturated than the ground, never grey (default: a warm ground's day amber; other light: assets/lights.json)
-    enableSoftShadows(lights.key, { softness: L.softness, maxPenumbra: L.maxPenumbra });
+    enableSoftShadows(lights.key, { softness: L.softness, maxPenumbra: L.maxPenumbra, blockerSamples: L.blockerSamples, filterSamples: L.filterSamples });
     lights.key.shadow.camera.layers.enable(SHADOW_ONLY_LAYER); H.keyLight = lights.key;
+    // one depth draw per caster: a card's front, back and edge groups write the same depth, so the shadow pass draws the
+    // whole geometry once with its first material instead of once per group (a third of the frame's draw calls)
+    const renderShadows = renderer.shadowMap.render, swappedCasters = [];
+    const drawWhole = (o) => { if (o.isMesh && o.castShadow && Array.isArray(o.material)) { swappedCasters.push(o, o.material); o.material = o.material[0]; } };
+    renderer.shadowMap.render = (shadowLights, shadowScene, shadowCamera) => {
+      if (shadowLights.length > 0) shadowScene.traverseVisible(drawWhole);
+      renderShadows.call(renderer.shadowMap, shadowLights, shadowScene, shadowCamera);
+      for (let i = 0; i < swappedCasters.length; i += 2) swappedCasters[i].material = swappedCasters[i + 1];
+      swappedCasters.length = 0;
+    };
     const post = new PaperPost(renderer, scene, camera, { haze: '#d8bf8e', hazeStart: 34, hazeEnd: 95, hazeAmount: 0.3, focusBand: 0.3, ramp: 0.3, maxBlur: 18,
       tint: [1.03, 0.985, 0.98], saturation: 0.96, greenDesat: 0.3, exposure: 0.82, contrast: 1.18, vignette: 0.03, ...lens });
     const M = moods[flags.MOOD];
@@ -753,7 +763,13 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
       drawSafe(b);
     }
     addEventListener('resize', resize);
-    H.setRenderScale = (scale) => { renderScaleNow = clampScale(scale); resize(); };   // a quality tier chosen after start
+    H.setQuality = ({ renderScale: scale, shadowMapSize, dofTaps }) => {   // a quality tier chosen after start (the soft shadow samples are compiled in: createHarness light.blockerSamples / filterSamples)
+      if (scale) renderScaleNow = clampScale(scale);
+      const shadow = lights.key.shadow;
+      if (shadowMapSize && shadow.mapSize.x !== shadowMapSize) { shadow.mapSize.set(shadowMapSize, shadowMapSize); shadow.map?.dispose(); shadow.map = null; }
+      if (dofTaps) post.o.taps = dofTaps;
+      resize();
+    };
     resize();
     setOpen(true);
     heroPos.set(hero.group.position.x, 0, hero.group.position.z); HERO0.copy(heroPos); heading = heading0 = hero.group.rotation.y;
@@ -763,7 +779,7 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
     }
     if (walkArea && (heroPos.x < walkArea.x0 || heroPos.x > walkArea.x1 || heroPos.z < walkArea.z0 || heroPos.z > walkArea.z1)) console.warn('papercraft: the hero starts outside walkArea: he cannot move');
     let last = performance.now(), auto = true;
-    renderer.setAnimationLoop((now) => { if (!auto) return; step(Math.min(0.05, Math.max(0, (now - last) / 1000))); last = now; render(); }); // dt clamped to [0, 50 ms]
+    renderer.setAnimationLoop((now) => { if (!auto) return; const t0 = performance.now(); step(Math.min(0.05, Math.max(0, (now - last) / 1000))); last = now; const t1 = performance.now(); render(); H.frameCost.stepMs = t1 - t0; H.frameCost.renderMs = performance.now() - t1; }); // dt clamped to [0, 50 ms]; frameCost: the main-thread ms of the last frame's step and render calls
     function restart() { // a full reset: hinges flat, the hero back at his start, the camera on its first view
       time = 0; for (const h of hinges) h.reset(0);
       heroPos.copy(HERO0); sync(); facing = 1; hero.pivot.scale.x = 1; moved = false; looking = false; view.dist = DIST0;

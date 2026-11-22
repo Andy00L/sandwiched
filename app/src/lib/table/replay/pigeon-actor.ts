@@ -11,6 +11,8 @@ import { applyFlip, stepFlip } from "../motion/verbs";
 import type { FlipTarget } from "../motion/verbs";
 import { TABLE_YAW_RAD } from "../stage/look";
 import type { Facing, PerchSpot } from "./perches";
+import { createBodyMemory, stepBody } from "./pigeon-body";
+import type { BodyCommand } from "./pigeon-body";
 
 const FLAT_RAD = Math.PI / 2 - 0.03;
 const FOLD_AWAY_MS = 240;
@@ -123,8 +125,7 @@ export function createPigeonActor(
     crease.update(dtSeconds);
     crease.group.visible = isWorn || crease.p > HIDDEN_BELOW_OPEN;
   }
-  let wasStunnedBy: "bonk" | "swat" | null = null;
-  let wasHidden = true;
+  const bodyMemory = createBodyMemory();
 
   function placeAt(along: number, height: number, deckZ: number): void {
     piece.group.position.set(along, 0.01 + height, deckZ);
@@ -134,32 +135,52 @@ export function createPigeonActor(
     piece.group.position.y += Math.min(1, Math.abs(foldPivot.rotation.x) / FLAT_RAD) * FOLDED_LIFT_UNITS;
   }
 
-  function applyStun(pose: Extract<PigeonPose, { kind: "stunned" }>, nowTick: number, tickMs: number, dtSeconds: number): void {
-    const elapsedMs = (nowTick - pose.sinceTick) * tickMs;
-    if (pose.cause === "swat") {
-      const flatness = smoothstep(elapsedMs / FLATTEN_MS);
-      foldPivot.rotation.x = flatness * FLAT_RAD;
-      swatWhipSpring.reset(0);
-      riseSpring = swatWhipSpring;
-      tongue.visible = true;
-    } else {
-      if (wasStunnedBy !== "bonk") bonkSpring.set(0);
-      tiltPivot.rotation.z = (1 - bonkSpring.step(dtSeconds)) * BONK_TILT_RAD;
+  function performBodyCommand(command: BodyCommand, nowTick: number, tickMs: number): void {
+    switch (command) {
+      case "appear":
+        appearSpring.reset(0);
+        appearSpring.set(1);
+        riseSpring = appearSpring;
+        return;
+      case "hide":
+        hideBody();
+        return;
+      case "flatten":
+        swatWhipSpring.reset(0);
+        riseSpring = swatWhipSpring;
+        tongue.visible = true;
+        return;
+      case "releaseFlatten":
+        swatWhipSpring.set(1);
+        tongue.visible = false;
+        crease.reset(1);
+        isCreaseWorn = true;
+        creaseUntilTick = nowTick + CREASE_MS / tickMs;
+        return;
+      case "bonk":
+        bonkSpring.set(0);
+        return;
+      case "releaseBonk":
+        bonkSpring.set(1);
+        return;
     }
-    wasStunnedBy = pose.cause;
   }
 
-  function settleAfterStun(nowTick: number, tickMs: number, dtSeconds: number): void {
-    if (wasStunnedBy === "swat") {
-      riseSpring.set(1);
-      tongue.visible = false;
-      crease.reset(1);
-      isCreaseWorn = true;
-      creaseUntilTick = nowTick + CREASE_MS / tickMs;
-    }
-    if (wasStunnedBy === "bonk") bonkSpring.set(1);
-    wasStunnedBy = null;
-    foldPivot.rotation.x = (1 - riseSpring.step(dtSeconds)) * FLAT_RAD;
+  function hideBody(): void {
+    tongue.visible = false;
+    swatWhipSpring.reset(1);
+    bonkSpring.reset(1);
+    riseSpring = appearSpring;
+    creaseUntilTick = Number.NEGATIVE_INFINITY;
+    isCreaseWorn = false;
+    crease.reset(0);
+    crease.group.visible = false;
+  }
+
+  function poseBody(pose: PigeonPose, nowTick: number, tickMs: number, dtSeconds: number): void {
+    const rise = riseSpring.step(dtSeconds);
+    foldPivot.rotation.x =
+      bodyMemory.body === "flattened" && pose.kind === "stunned" ? smoothstep(((nowTick - pose.sinceTick) * tickMs) / FLATTEN_MS) * FLAT_RAD : (1 - rise) * FLAT_RAD;
     tiltPivot.rotation.z = (1 - bonkSpring.step(dtSeconds)) * BONK_TILT_RAD;
   }
 
@@ -177,22 +198,14 @@ export function createPigeonActor(
     reset() {
       lastPeckTick = Number.NEGATIVE_INFINITY;
       lastFlinchTick = Number.NEGATIVE_INFINITY;
-      creaseUntilTick = Number.NEGATIVE_INFINITY;
-      isCreaseWorn = false;
-      crease.reset(0);
-      crease.group.visible = false;
-      tongue.visible = false;
       for (const star of stars) {
         star.reset(0);
         star.group.visible = false;
       }
       starTargets.fill(0);
-      wasStunnedBy = null;
-      wasHidden = true;
+      hideBody();
+      Object.assign(bodyMemory, createBodyMemory());
       appearSpring.reset(1);
-      swatWhipSpring.reset(1);
-      riseSpring = appearSpring;
-      bonkSpring.reset(1);
       flip = 1;
       applyFlip(turnPivot, flip);
       foldPivot.rotation.set(0, 0, 0);
@@ -204,17 +217,9 @@ export function createPigeonActor(
       piece.group.visible = true;
     },
     update(pose, nowTick, tickMs, dtSeconds) {
+      for (const command of stepBody(bodyMemory, pose.kind === "hidden", pose.kind === "stunned" ? pose.cause : null)) performBodyCommand(command, nowTick, tickMs);
       piece.group.visible = pose.kind !== "hidden";
-      if (pose.kind === "hidden") {
-        wasHidden = true;
-        return;
-      }
-      if (wasHidden) {
-        wasHidden = false;
-        appearSpring.reset(0);
-        appearSpring.set(1);
-        riseSpring = appearSpring;
-      }
+      if (pose.kind === "hidden") return;
       updateStars(pose, nowTick, tickMs, dtSeconds);
       updateCrease(nowTick, dtSeconds);
       let facing: Facing = "right";
@@ -237,13 +242,9 @@ export function createPigeonActor(
       }
       flip = stepFlip(flip, flipTarget(facing), dtSeconds);
       applyFlip(turnPivot, flip);
-      if (pose.kind === "stunned") {
-        applyStun(pose, nowTick, tickMs, dtSeconds);
-        liftOffDeckWhileFolded();
-        return;
-      }
-      settleAfterStun(nowTick, tickMs, dtSeconds);
+      poseBody(pose, nowTick, tickMs, dtSeconds);
       liftOffDeckWhileFolded();
+      if (pose.kind === "stunned") return;
       const isAirborne = pose.kind === "flying" || pose.kind === "hovering";
       const flap = isAirborne ? Math.sin(((nowTick * tickMs) / 1000) * Math.PI * 2 * WING_FLAP_HZ + seat) * WING_FLAP_RAD : 0;
       const flinch = pose.kind === "perched" && (nowTick - lastFlinchTick) * tickMs < FLINCH_MS ? -FLINCH_WING_RAD : 0;

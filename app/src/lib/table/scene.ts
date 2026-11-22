@@ -52,7 +52,7 @@ import { buildReplayScene } from "./replay/replay-scene";
 import { recordFrameTimes } from "./stage/frame-recorder";
 import { buildParkLife } from "./stage/park-life";
 import { printParkGround } from "./stage/park-ground";
-import { probeQualityTier, storedRenderScale } from "./stage/quality-probe";
+import { probeQualityTier, storedQuality } from "./stage/quality-probe";
 import { PAPER_STOCK, PARK_LENS, PARK_LIGHT, PARK_TEST_VIEW, PARK_VIEW, SCENE_FOCUS, TABLE_YAW_RAD, TEST_CARD_SPOT } from "./stage/look";
 
 type SceneMode = { kind: "sample" } | { kind: "replay"; round: RecordedRound };
@@ -166,15 +166,16 @@ async function readSceneMode(): Promise<SceneMode> {
 
 export async function buildTableScene(): Promise<void> {
   const mode = await readSceneMode();
+  const quality = storedQuality();
   const harness = createHarness({
     ground: GROUND_INKS.lawn,
     stock: PAPER_STOCK,
     view: PARK_VIEW,
     testView: PARK_TEST_VIEW,
-    light: PARK_LIGHT,
-    lens: PARK_LENS,
+    light: { ...PARK_LIGHT, mapSize: quality.shadowMapSize, blockerSamples: quality.blockerSamples, filterSamples: quality.filterSamples },
+    lens: { ...PARK_LENS, taps: quality.dofTaps },
     focus: SCENE_FOCUS,
-    renderScale: storedRenderScale(),
+    renderScale: quality.renderScale,
   });
   harness.printGround((tools) => printParkGround(tools, harness.bounds));
   if (harness.flags.TEST) buildTestCards(harness);
@@ -182,7 +183,7 @@ export async function buildTableScene(): Promise<void> {
   harness.start();
   probeQualityTier(harness);
   holdAtRequestedTime();
-  reportFrameTimesWhenAsked();
+  reportFrameTimesWhenAsked(harness);
 }
 
 function holdAtRequestedTime(): void {
@@ -194,11 +195,11 @@ function holdAtRequestedTime(): void {
 
 const FRAME_RECORDER_WARMUP_MS = 1500;
 
-function reportFrameTimesWhenAsked(): void {
+function reportFrameTimesWhenAsked(harness: Harness): void {
   const requestedSeconds = Number(new URLSearchParams(location.search).get("fps"));
   if (!(requestedSeconds > 0)) return;
   window.setTimeout(() => {
-    void recordFrameTimes(requestedSeconds * 1000).then((summary) => {
+    void recordFrameTimes(requestedSeconds * 1000, harness.frameCost).then((summary) => {
       console.info(`[reportFrameTimesWhenAsked] ${JSON.stringify(summary)}`);
     });
   }, FRAME_RECORDER_WARMUP_MS);
