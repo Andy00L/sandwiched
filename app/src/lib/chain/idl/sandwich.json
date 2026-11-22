@@ -1,0 +1,2393 @@
+{
+  "address": "CvPa7U3XSH6QHGkG2PoPokuUAQd2xJqYSTupmKYank2n",
+  "metadata": {
+    "name": "sandwich",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "The Sandwich table program: seats, antes, the whale draw, pecks, swats and settlement on a MagicBlock Ephemeral Rollup."
+  },
+  "instructions": [
+    {
+      "name": "ante",
+      "discriminator": [
+        166,
+        19,
+        18,
+        9,
+        41,
+        248,
+        44,
+        242
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "buy_in",
+      "discriminator": [
+        126,
+        94,
+        133,
+        165,
+        163,
+        236,
+        161,
+        152
+      ],
+      "accounts": [
+        {
+          "name": "wallet",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet_token",
+          "writable": true
+        },
+        {
+          "name": "escrow_token",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "chips",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "cancel_draw",
+      "discriminator": [
+        105,
+        47,
+        245,
+        199,
+        42,
+        255,
+        88,
+        48
+      ],
+      "accounts": [
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cash_out",
+      "discriminator": [
+        1,
+        110,
+        57,
+        58,
+        159,
+        157,
+        243,
+        192
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "custody",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet_token",
+          "writable": true
+        },
+        {
+          "name": "escrow_token",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "chips",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create_table",
+      "discriminator": [
+        214,
+        142,
+        131,
+        250,
+        242,
+        83,
+        135,
+        185
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "table_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "table_id",
+          "type": "u64"
+        },
+        {
+          "name": "ante_units",
+          "type": "u64"
+        },
+        {
+          "name": "box_count",
+          "type": "u8"
+        },
+        {
+          "name": "validator",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "create_test_mint",
+      "discriminator": [
+        171,
+        252,
+        250,
+        200,
+        81,
+        220,
+        199,
+        125
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "test_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  115,
+                  116,
+                  95,
+                  117,
+                  115,
+                  100,
+                  99
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "faucet_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  97,
+                  117,
+                  99,
+                  101,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "delegate_seat",
+      "discriminator": [
+        53,
+        85,
+        50,
+        81,
+        161,
+        68,
+        71,
+        212
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "wallet"
+        },
+        {
+          "name": "table"
+        },
+        {
+          "name": "buffer_seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "seat"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                177,
+                29,
+                220,
+                44,
+                143,
+                184,
+                15,
+                215,
+                165,
+                92,
+                152,
+                161,
+                101,
+                41,
+                179,
+                30,
+                24,
+                145,
+                219,
+                62,
+                219,
+                42,
+                192,
+                46,
+                192,
+                29,
+                195,
+                139,
+                184,
+                181,
+                145,
+                107
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegation_record_seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "seat"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "delegation_metadata_seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "seat"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_program",
+          "address": "CvPa7U3XSH6QHGkG2PoPokuUAQd2xJqYSTupmKYank2n"
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "delegate_table",
+      "discriminator": [
+        161,
+        66,
+        67,
+        113,
+        58,
+        219,
+        238,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "buffer_table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                177,
+                29,
+                220,
+                44,
+                143,
+                184,
+                15,
+                215,
+                165,
+                92,
+                152,
+                161,
+                101,
+                41,
+                179,
+                30,
+                24,
+                145,
+                219,
+                62,
+                219,
+                42,
+                192,
+                46,
+                192,
+                29,
+                195,
+                139,
+                184,
+                181,
+                145,
+                107
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegation_record_table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "delegation_metadata_table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "table",
+          "writable": true
+        },
+        {
+          "name": "owner_program",
+          "address": "CvPa7U3XSH6QHGkG2PoPokuUAQd2xJqYSTupmKYank2n"
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "faucet",
+      "discriminator": [
+        0,
+        98,
+        59,
+        30,
+        144,
+        142,
+        113,
+        12
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "wallet",
+          "signer": true
+        },
+        {
+          "name": "claim",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  97,
+                  117,
+                  99,
+                  101,
+                  116,
+                  95,
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "test_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  101,
+                  115,
+                  116,
+                  95,
+                  117,
+                  115,
+                  100,
+                  99
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "faucet_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  97,
+                  117,
+                  99,
+                  101,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "wallet_token",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "fly_to",
+      "discriminator": [
+        149,
+        123,
+        89,
+        32,
+        93,
+        78,
+        68,
+        206
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "box_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "join",
+      "discriminator": [
+        206,
+        55,
+        2,
+        106,
+        113,
+        220,
+        17,
+        163
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "leave",
+      "discriminator": [
+        59,
+        234,
+        148,
+        108,
+        107,
+        149,
+        173,
+        112
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "on_whale_drawn",
+      "discriminator": [
+        88,
+        64,
+        238,
+        109,
+        203,
+        36,
+        2,
+        194
+      ],
+      "accounts": [
+        {
+          "name": "vrf_program_identity",
+          "signer": true,
+          "address": "8jDJvu5ttcJKoECysvYq4k5bYbaqhk1baoc1gk7aq98V"
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "round_number",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "peck",
+      "discriminator": [
+        74,
+        59,
+        209,
+        14,
+        42,
+        234,
+        123,
+        125
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "process_undelegation",
+      "discriminator": [
+        196,
+        28,
+        41,
+        206,
+        48,
+        37,
+        51,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "base_account",
+          "writable": true
+        },
+        {
+          "name": "buffer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  101,
+                  45,
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "base_account"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                181,
+                183,
+                0,
+                225,
+                242,
+                87,
+                58,
+                192,
+                204,
+                6,
+                34,
+                1,
+                52,
+                74,
+                207,
+                151,
+                184,
+                53,
+                6,
+                235,
+                140,
+                229,
+                25,
+                152,
+                204,
+                98,
+                126,
+                24,
+                147,
+                128,
+                167,
+                62
+              ]
+            }
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "account_seeds",
+          "type": {
+            "vec": "bytes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "raise_hand",
+      "discriminator": [
+        195,
+        192,
+        97,
+        159,
+        186,
+        38,
+        72,
+        19
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "box_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "settle",
+      "discriminator": [
+        175,
+        42,
+        185,
+        87,
+        144,
+        131,
+        102,
+        212
+      ],
+      "accounts": [
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "sit",
+      "discriminator": [
+        45,
+        56,
+        130,
+        121,
+        149,
+        249,
+        90,
+        216
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "wallet",
+          "signer": true
+        },
+        {
+          "name": "table"
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "start_round",
+      "discriminator": [
+        144,
+        144,
+        43,
+        7,
+        193,
+        42,
+        217,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc"
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "take_off",
+      "discriminator": [
+        93,
+        148,
+        105,
+        60,
+        5,
+        236,
+        27,
+        43
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "Table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "Seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "FaucetClaim",
+      "discriminator": [
+        88,
+        39,
+        189,
+        221,
+        15,
+        215,
+        24,
+        248
+      ]
+    },
+    {
+      "name": "Seat",
+      "discriminator": [
+        90,
+        228,
+        22,
+        90,
+        162,
+        86,
+        173,
+        26
+      ]
+    },
+    {
+      "name": "Table",
+      "discriminator": [
+        34,
+        100,
+        138,
+        97,
+        236,
+        129,
+        230,
+        112
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 7000,
+      "name": "WrongPhase",
+      "msg": "This action is not allowed in the current phase"
+    },
+    {
+      "code": 7001,
+      "name": "NotSeated",
+      "msg": "The seat has not joined the table"
+    },
+    {
+      "code": 7002,
+      "name": "AlreadyAnted",
+      "msg": "The seat has already anted this round"
+    },
+    {
+      "code": 7003,
+      "name": "NotEnoughChips",
+      "msg": "The seat holds fewer chips than needed"
+    },
+    {
+      "code": 7004,
+      "name": "TooFewPlayers",
+      "msg": "At least two seats must ante"
+    },
+    {
+      "code": 7005,
+      "name": "LobbyStillOpen",
+      "msg": "The lobby is still open"
+    },
+    {
+      "code": 7006,
+      "name": "NotTheWhale",
+      "msg": "Only the whale can do that"
+    },
+    {
+      "code": 7007,
+      "name": "WhaleCannotPeck",
+      "msg": "The whale cannot peck or fly"
+    },
+    {
+      "code": 7008,
+      "name": "Stunned",
+      "msg": "The pigeon is stunned"
+    },
+    {
+      "code": 7009,
+      "name": "PeckTooSoon",
+      "msg": "The pigeon pecked too recently"
+    },
+    {
+      "code": 7010,
+      "name": "NotPerched",
+      "msg": "The pigeon is not perched on a box"
+    },
+    {
+      "code": 7011,
+      "name": "BoxFull",
+      "msg": "Every perch on that box is taken"
+    },
+    {
+      "code": 7012,
+      "name": "HandBusy",
+      "msg": "The hand is not ready"
+    },
+    {
+      "code": 7013,
+      "name": "NoSwitchesLeft",
+      "msg": "No switches left this round"
+    },
+    {
+      "code": 7014,
+      "name": "SwitchTooSoon",
+      "msg": "The sandwich moved too recently"
+    },
+    {
+      "code": 7015,
+      "name": "RoundNotOver",
+      "msg": "The round is not over yet"
+    },
+    {
+      "code": 7016,
+      "name": "DrawNotTimedOut",
+      "msg": "The draw has not timed out yet"
+    },
+    {
+      "code": 7017,
+      "name": "TableFull",
+      "msg": "Every seat at the table is taken"
+    },
+    {
+      "code": 7018,
+      "name": "BadBox",
+      "msg": "There is no such box at this table"
+    },
+    {
+      "code": 7019,
+      "name": "MathOverflow",
+      "msg": "A number overflowed"
+    },
+    {
+      "code": 7020,
+      "name": "NotVrf",
+      "msg": "Only the VRF program can deliver the draw"
+    },
+    {
+      "code": 7021,
+      "name": "NotSeatOwner",
+      "msg": "The signer is neither the seat's wallet nor a session for it"
+    },
+    {
+      "code": 7022,
+      "name": "AlreadySeated",
+      "msg": "The seat has already joined the table"
+    },
+    {
+      "code": 7023,
+      "name": "NotInRound",
+      "msg": "The seat did not ante this round"
+    },
+    {
+      "code": 7024,
+      "name": "RoundOver",
+      "msg": "The round is over"
+    },
+    {
+      "code": 7025,
+      "name": "AlreadyThere",
+      "msg": "The pigeon is already on that box"
+    },
+    {
+      "code": 7026,
+      "name": "AlreadyHovering",
+      "msg": "The pigeon is already in the air"
+    },
+    {
+      "code": 7027,
+      "name": "BadBoxCount",
+      "msg": "A table has 1 to 3 boxes"
+    },
+    {
+      "code": 7028,
+      "name": "BadAnte",
+      "msg": "The ante must be a positive multiple of 100 token units"
+    },
+    {
+      "code": 7029,
+      "name": "ZeroChips",
+      "msg": "The amount must be at least one chip"
+    },
+    {
+      "code": 7030,
+      "name": "NotTableSeat",
+      "msg": "The account is not a seat of this table"
+    },
+    {
+      "code": 7031,
+      "name": "DuplicateSeat",
+      "msg": "The same seat was passed twice"
+    },
+    {
+      "code": 7032,
+      "name": "MissingSeat",
+      "msg": "An anted seat is missing"
+    },
+    {
+      "code": 7033,
+      "name": "StaleDraw",
+      "msg": "The randomness belongs to an earlier draw"
+    },
+    {
+      "code": 7034,
+      "name": "UnknownQueue",
+      "msg": "The oracle queue is not the ephemeral queue"
+    },
+    {
+      "code": 7035,
+      "name": "WrongTokenAccount",
+      "msg": "The token account has the wrong owner or mint"
+    },
+    {
+      "code": 7036,
+      "name": "ChipsNotConserved",
+      "msg": "The chips at the table do not add up"
+    },
+    {
+      "code": 7037,
+      "name": "FaucetCooldown",
+      "msg": "The faucet gives once per wallet per hour"
+    },
+    {
+      "code": 7038,
+      "name": "BadTickLength",
+      "msg": "The tick length must be positive"
+    },
+    {
+      "code": 7039,
+      "name": "StillInRound",
+      "msg": "The seat is in a round that is not settled"
+    },
+    {
+      "code": 7040,
+      "name": "ChipsRemaining",
+      "msg": "Cash out every chip before leaving"
+    },
+    {
+      "code": 7041,
+      "name": "NotTable",
+      "msg": "The account is not a table of this program"
+    }
+  ],
+  "types": [
+    {
+      "name": "FaucetClaim",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "last_claim_unix",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Phase",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Lobby",
+            "fields": [
+              {
+                "name": "first_ante_tick",
+                "type": "u64"
+              }
+            ]
+          },
+          {
+            "name": "Drawing",
+            "fields": [
+              {
+                "name": "requested_tick",
+                "type": "u64"
+              }
+            ]
+          },
+          {
+            "name": "Live",
+            "fields": [
+              {
+                "name": "whale_seat",
+                "type": "u8"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundResult",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_number",
+            "type": "u64"
+          },
+          {
+            "name": "whale_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "sandwich_box",
+            "type": "u8"
+          },
+          {
+            "name": "whale_crumbs",
+            "type": "u64"
+          },
+          {
+            "name": "pigeon_crumbs",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Seat",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "seat_index",
+            "type": {
+              "option": "u8"
+            }
+          },
+          {
+            "name": "chips",
+            "type": "u64"
+          },
+          {
+            "name": "pigeon",
+            "type": {
+              "defined": {
+                "name": "StoredPigeon"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionTokenV2",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "target_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_signer",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "valid_until",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StoredHand",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Idle",
+            "fields": [
+              {
+                "name": "ready_tick",
+                "type": "u64"
+              }
+            ]
+          },
+          {
+            "name": "Raised",
+            "fields": [
+              {
+                "name": "box_index",
+                "type": "u8"
+              },
+              {
+                "name": "lands_tick",
+                "type": "u64"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "StoredPigeon",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "StoredPigeonState"
+              }
+            }
+          },
+          {
+            "name": "beak_crumbs",
+            "type": "u64"
+          },
+          {
+            "name": "next_peck_tick",
+            "type": "u64"
+          },
+          {
+            "name": "last_swat_number",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StoredPigeonState",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Hovering"
+          },
+          {
+            "name": "Flying",
+            "fields": [
+              {
+                "name": "box_index",
+                "type": "u8"
+              },
+              {
+                "name": "lands_tick",
+                "type": "u64"
+              }
+            ]
+          },
+          {
+            "name": "Perched",
+            "fields": [
+              {
+                "name": "box_index",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "Stunned",
+            "fields": [
+              {
+                "name": "box_index",
+                "type": "u8"
+              },
+              {
+                "name": "until_tick",
+                "type": "u64"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "StoredRound",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "box_count",
+            "type": "u8"
+          },
+          {
+            "name": "sandwich_box",
+            "type": "u8"
+          },
+          {
+            "name": "end_tick",
+            "type": "u64"
+          },
+          {
+            "name": "anted_crumbs",
+            "type": "u64"
+          },
+          {
+            "name": "pot_crumbs",
+            "type": "u64"
+          },
+          {
+            "name": "loose_crumbs",
+            "type": {
+              "array": [
+                "u64",
+                3
+              ]
+            }
+          },
+          {
+            "name": "perch_claims",
+            "type": {
+              "array": [
+                "u8",
+                3
+              ]
+            }
+          },
+          {
+            "name": "hand",
+            "type": {
+              "defined": {
+                "name": "StoredHand"
+              }
+            }
+          },
+          {
+            "name": "swats",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "StoredSwat"
+                  }
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "swat_count",
+            "type": "u64"
+          },
+          {
+            "name": "switch_count",
+            "type": "u8"
+          },
+          {
+            "name": "next_switch_tick",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StoredSwat",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "number",
+            "type": "u64"
+          },
+          {
+            "name": "box_index",
+            "type": "u8"
+          },
+          {
+            "name": "lands_tick",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Table",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "custody_bump",
+            "type": "u8"
+          },
+          {
+            "name": "table_id",
+            "type": "u64"
+          },
+          {
+            "name": "validator",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "ante_units",
+            "type": "u64"
+          },
+          {
+            "name": "chip_units",
+            "type": "u64"
+          },
+          {
+            "name": "box_count",
+            "type": "u8"
+          },
+          {
+            "name": "round_number",
+            "type": "u64"
+          },
+          {
+            "name": "seats",
+            "type": {
+              "array": [
+                "pubkey",
+                21
+              ]
+            }
+          },
+          {
+            "name": "anted",
+            "type": "u32"
+          },
+          {
+            "name": "phase",
+            "type": {
+              "defined": {
+                "name": "Phase"
+              }
+            }
+          },
+          {
+            "name": "round",
+            "type": {
+              "defined": {
+                "name": "StoredRound"
+              }
+            }
+          },
+          {
+            "name": "last_result",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "RoundResult"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
