@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { Harness } from "papercraft/harness.js";
+import type { Harness, PlacedPiece } from "papercraft/harness.js";
 import * as P2 from "papercraft/lib/paperkit-2d.js";
 import type { PaintFn, Point, Print } from "papercraft/lib/paperkit-2d.js";
 import { prismFold } from "papercraft/lib/paperkit-3d.js";
@@ -164,6 +164,7 @@ function paintHandle(print: Print): void {
 
 export interface LunchboxModel {
   node: THREE.Group;
+  piece: PlacedPiece;
   setLidOpen(openAmount: number): void;
 }
 
@@ -197,10 +198,11 @@ export function buildLunchbox(harness: Harness, look: LunchboxLook, boxIndex: nu
     closedLidAngle = lid.rotation.x;
     lid.rotation.x = closedLidAngle + LID_OPEN_RAD * lidOpenAmount;
   };
-  harness.popup(null, null, { node, height: LUNCHBOX_HEIGHT_UNITS, parent: deck, x: along, z: acrossDeck - LUNCHBOX_DEPTH_UNITS, yaw: 0, order });
+  const piece = harness.popup(null, null, { node, height: LUNCHBOX_HEIGHT_UNITS, parent: deck, x: along, z: acrossDeck - LUNCHBOX_DEPTH_UNITS, yaw: 0, order });
   harness.popup(handleOutline(), paintHandle, { parent: lidTop, x: 0, z: -0.2, yaw: Math.PI, order: order + 0.6, scale: 1 });
   return {
     node,
+    piece,
     setLidOpen(openAmount) {
       lidOpenAmount = openAmount;
       lid.rotation.x = closedLidAngle + LID_OPEN_RAD * openAmount;

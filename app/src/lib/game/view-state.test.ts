@@ -10,6 +10,7 @@ const CANONICAL_FILE_NAMES = [
   "crowd.json",
   "duel.json",
   "pigeons-feast.json",
+  "slam-showcase.json",
   "whale-keeps.json",
 ];
 
@@ -45,7 +46,7 @@ function findConservationBreak(round: RecordedRound): string | null {
 }
 
 describe("canonical rounds", () => {
-  test("the folder holds exactly the five rounds and each one parses", () => {
+  test("the folder holds exactly the recorded rounds and each one parses", () => {
     const fileNames = readdirSync(ROUNDS_DIRECTORY).filter((fileName) => fileName.endsWith(".json"));
     expect(fileNames.sort()).toEqual(CANONICAL_FILE_NAMES);
     for (const fileName of CANONICAL_FILE_NAMES) {

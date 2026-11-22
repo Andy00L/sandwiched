@@ -18,8 +18,8 @@ function perchKey(pose: SeatPose): string | null {
 }
 
 describe("round director", () => {
-  test("loads all five canonical rounds", () => {
-    expect(CANONICAL_ROUNDS.length).toBe(5);
+  test("loads all six recorded rounds", () => {
+    expect(CANONICAL_ROUNDS.length).toBe(6);
   });
 
   test.each(CANONICAL_ROUNDS)("%s: no two pigeons share a perch slot and every slot exists", (_fileName, round) => {
@@ -34,9 +34,10 @@ describe("round director", () => {
 
   test.each(CANONICAL_ROUNDS)("%s: every landing perches the pigeon on the box it flew to", (_fileName, round) => {
     const director = createRoundDirector(round);
+    const takeOffKeys = new Set(round.events.flatMap((event) => (event.kind === "tookOff" ? [`${event.seat}:${event.tick}`] : [])));
     for (const event of round.events) {
       director.advanceTo(event.tick);
-      if (event.kind !== "landed") continue;
+      if (event.kind !== "landed" || takeOffKeys.has(`${event.seat}:${event.tick}`)) continue;
       const pose = director.poseOf(event.seat, event.tick);
       expect(pose.kind === "perched" || pose.kind === "stunned" ? pose.at.box : null).toBe(event.box);
     }

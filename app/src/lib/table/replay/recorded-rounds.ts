@@ -7,6 +7,7 @@ const ROUND_FILES = {
   crowd: () => import("../../../../tests/rounds/crowd.json"),
   "whale-keeps": () => import("../../../../tests/rounds/whale-keeps.json"),
   "pigeons-feast": () => import("../../../../tests/rounds/pigeons-feast.json"),
+  "slam-showcase": () => import("../../../../tests/rounds/slam-showcase.json"),
 } as const;
 
 type RoundName = keyof typeof ROUND_FILES;

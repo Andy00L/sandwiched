@@ -5,7 +5,7 @@ import { FlapSpring } from "papercraft/lib/paperkit-3d.js";
 import { parseRecordedRound } from "../../game/round-events";
 import { PECK_STRIKE_MS } from "./motion-tokens";
 import { flightPlacement, peckDepth } from "./pigeon-clips";
-import { popScale, stepFlip } from "./verbs";
+import { stepFlip } from "./verbs";
 
 const FRAME_30_S = 1 / 30;
 const FRAME_60_MS = 1000 / 60;
@@ -104,10 +104,5 @@ describe("motion acceptance (plan/07 section 12)", () => {
     }
     expect(elapsed).toBeLessThanOrEqual(0.2);
     expect(seen.every((value) => Math.abs(value) >= 0.12)).toBe(true);
-  });
-
-  test("the pop verb peaks near 1.07", () => {
-    expect(popScale(0.61)).toBeCloseTo(1.07, 2);
-    expect(popScale(1)).toBe(1);
   });
 });

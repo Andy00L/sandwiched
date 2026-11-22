@@ -8,7 +8,7 @@ import { HOVER_HEIGHT_UNITS, REVEAL_LID_STAGGER_S } from "../motion/motion-token
 import { crumbOutline, mothCard, paintCrumb, SANDWICH_BITE_STAGES, sandwichCard } from "../pieces/lunch";
 import { LUNCHBOX_DEPTH_UNITS, LUNCHBOX_HEIGHT_UNITS, LUNCHBOX_WIDTH_UNITS } from "../pieces/lunchbox";
 import type { LunchboxModel } from "../pieces/lunchbox";
-import { PIGEON_VARIANTS, printCropBags } from "../pieces/pigeon";
+import { PIGEON_VARIANTS, printCropBags, printStunStar } from "../pieces/pigeon";
 import type { PigeonKit, PigeonVariant } from "../pieces/pigeon";
 import type { PicnicTable } from "../pieces/table";
 import { restHandPosition, TOWARD_CAMERA_IN_WHALE } from "../pieces/whale";
@@ -22,7 +22,8 @@ import type { PerchSpot } from "./perches";
 import { createRoundDirector } from "./round-director";
 import type { FlightEnd, SeatPose } from "./round-director";
 import { raisedHandPosition, slamHandPosition } from "./slam";
-import { createMoodGovernor, crowdedGlance } from "./whale-mood";
+import { createMoodGovernor, crowdedGlance, glanceTowardBox } from "./whale-mood";
+import { boxHopRad, cameraDropUnits, deckDipRad, flipperShakeRad, hitStopMs, lidPopAmount, presentationTick, torsoLeanRad } from "../motion/impact";
 
 const REPLAY_LEAD_S = 2.5;
 const WHISTLE_S = 0.4;
@@ -32,10 +33,35 @@ const CRUMBS_PER_LATER_BIT = 5;
 const REVEAL_PROP_DELAY_S = 0.08;
 const ANGRY_AFTER_LANDING_MS = 400;
 const SPOUT_MIN_HITS = 3;
+const MISS_LOOK_MS = 600;
+const CRUMB_FLIGHT_MIN_MS = 350;
+const CRUMB_FLIGHT_SPREAD_MS = 250;
+const CRUMB_LAUNCH_HEIGHT_UNITS = 2;
+const CRUMB_ARC_PEAK_UNITS = 2.2;
+const CRUMB_TUMBLE_RAD_PER_S = 1.5;
+
+interface CrumbFlight {
+  fromAlong: number;
+  fromDeckZ: number;
+  startTick: number;
+  durationTicks: number;
+}
 
 interface CrumbBit {
   piece: PlacedPiece;
   isShown: boolean;
+  homeAlong: number;
+  homeDeckZ: number;
+  homeYaw: number;
+  flight: CrumbFlight | null;
+}
+
+interface SwatLanding {
+  tick: number;
+  hitCount: number;
+  box: number;
+  hitSeats: readonly number[];
+  hasFlinched: boolean;
 }
 
 interface RevealBox {
@@ -82,16 +108,12 @@ function buildCrumbBits(harness: Harness, deck: THREE.Object3D, boxCount: number
   return [...Array(boxCount).keys()].map((boxIndex) => {
     const random = P2.rng(640 + boxIndex);
     return [...Array(CRUMB_BITS_PER_BOX).keys()].map((bitIndex): CrumbBit => {
-      const piece = harness.popup(outline, null, {
-        materials,
-        parent: deck,
-        x: boxAlong(boxIndex, boxCount) + (random() * 2 - 1) * (LUNCHBOX_WIDTH_UNITS / 2 + 0.8),
-        z: BOX_ROW_DECK_Z + 0.3 + random() * 1.5,
-        yaw: (random() - 0.5) * 1.2,
-        order: order + bitIndex * 0.01,
-      });
+      const homeAlong = boxAlong(boxIndex, boxCount) + (random() * 2 - 1) * (LUNCHBOX_WIDTH_UNITS / 2 + 0.8);
+      const homeDeckZ = BOX_ROW_DECK_Z + 0.3 + random() * 1.5;
+      const homeYaw = (random() - 0.5) * 1.2;
+      const piece = harness.popup(outline, null, { materials, parent: deck, x: homeAlong, z: homeDeckZ, yaw: homeYaw, order: order + bitIndex * 0.01 });
       piece.group.visible = false;
-      return { piece, isShown: false };
+      return { piece, isShown: false, homeAlong, homeDeckZ, homeYaw, flight: null };
     });
   });
 }
@@ -152,12 +174,13 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
   const order = table.table.order + 1.2;
   const kits = new Map<PigeonVariant, PigeonKit>();
   const cropBags = printCropBags(harness.cardOpts(0, 0, 1, deck));
+  const star = printStunStar(harness.cardOpts(0, 0, 1, deck));
   const actors = round.players.map((player, playerIndex) => {
     const variant = PIGEON_VARIANTS[player.variant % PIGEON_VARIANTS.length] ?? "gary";
     const kit = kits.get(variant) ?? printPigeonVariant(harness, deck, variant);
     kits.set(variant, kit);
-    const actor: PigeonActor = createPigeonActor(harness, deck, kit, cropBags, player.seat, order + playerIndex * 0.05);
-    return { seat: player.seat, actor, hover: hoverSpot(playerIndex, round.players.length) };
+    const actor: PigeonActor = createPigeonActor(harness, deck, { kit, cropBags, star }, player.seat, order + playerIndex * 0.05);
+    return { seat: player.seat, actor, hover: hoverSpot(playerIndex) };
   });
   const actorBySeat = new Map(actors.map((entry) => [entry.seat, entry.actor]));
   const crumbBits = buildCrumbBits(harness, deck, boxCount, order + 2);
@@ -169,7 +192,11 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
   const revealStartTick = settledTick + (WHISTLE_S * 1000) / tickMs;
   const lidStaggerTicks = (REVEAL_LID_STAGGER_S * 1000) / tickMs;
   const windupMs = round.timing.swatWindupTicks * tickMs;
+  const baseTargetY = harness.target.y;
   let revealOrder: RevealBox[] | null = null;
+  let lastLanding: SwatLanding | null = null;
+  let previousPresentationTick: number | null = null;
+  let missUntilMs = Number.NEGATIVE_INFINITY;
 
   function sortNearestFirst(reveals: readonly RevealBox[]): RevealBox[] {
     const cameraPosition = harness.camera.getWorldPosition(new THREE.Vector3());
@@ -186,30 +213,83 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
         .filter((candidate) => armForBox(whale, candidate.box, boxCount) === rig)
         .reduce<(typeof raises)[number] | null>((latest, candidate) => (latest && latest.tick >= candidate.tick ? latest : candidate), null);
       const rest = restHandPosition(rig.side);
+      const msFromLanding = raise ? (nowTick - raise.landsTick) * tickMs : Number.POSITIVE_INFINITY;
       const hand = raise
-        ? slamHandPosition(
-            { rest, raised: raisedHandPosition(rig.shoulder, rig.side), contact: lidContactLocal(deck, whale.group, raise.box, boxCount) },
-            (nowTick - raise.landsTick) * tickMs,
-            windupMs,
-          )
+        ? slamHandPosition({ rest, raised: raisedHandPosition(rig.shoulder, rig.side), contact: lidContactLocal(deck, whale.group, raise.box, boxCount) }, msFromLanding, windupMs)
         : rest;
       poseArm(rig, hand, TOWARD_CAMERA_IN_WHALE);
+      rig.fore.rotateZ(flipperShakeRad(msFromLanding));
     }
+    const latestRaise = raises.reduce<(typeof raises)[number] | null>((latest, candidate) => (latest && latest.tick >= candidate.tick ? latest : candidate), null);
+    whale.whale.sway = latestRaise ? -torsoLeanRad((nowTick - latestRaise.landsTick) * tickMs, windupMs) : 0;
   }
 
-  function showCrumbs(looseCrumbs: readonly number[]): void {
+  function launchCrumb(bit: CrumbBit, bitIndex: number, landing: SwatLanding, presentTick: number): void {
+    const hitSeat = landing.hitSeats[bitIndex % Math.max(1, landing.hitSeats.length)];
+    const hitPose = hitSeat === undefined ? null : director.poseOf(hitSeat, presentTick);
+    const from = hitPose && (hitPose.kind === "stunned" || hitPose.kind === "perched") ? perchSpot(hitPose.at.box, boxCount, hitPose.at.slot) : null;
+    if (!from) return;
+    bit.flight = { fromAlong: from.along, fromDeckZ: from.deckZ, startTick: landing.tick, durationTicks: (CRUMB_FLIGHT_MIN_MS + ((bitIndex * 97) % CRUMB_FLIGHT_SPREAD_MS)) / tickMs };
+  }
+
+  function placeCrumb(bit: CrumbBit, presentTick: number): void {
+    const flight = bit.flight;
+    const progress = flight ? (presentTick - flight.startTick) / flight.durationTicks : 1;
+    if (!flight || progress >= 1) {
+      bit.flight = null;
+      bit.piece.group.position.set(bit.homeAlong, 0.01, bit.homeDeckZ);
+      bit.piece.group.rotation.y = bit.homeYaw;
+      return;
+    }
+    const clamped = Math.max(0, progress);
+    bit.piece.group.position.set(
+      flight.fromAlong + (bit.homeAlong - flight.fromAlong) * clamped,
+      0.01 + CRUMB_LAUNCH_HEIGHT_UNITS * (1 - clamped) + CRUMB_ARC_PEAK_UNITS * 4 * clamped * (1 - clamped),
+      flight.fromDeckZ + (bit.homeDeckZ - flight.fromDeckZ) * clamped,
+    );
+    bit.piece.group.rotation.y = bit.homeYaw + ((presentTick - flight.startTick) * tickMs * CRUMB_TUMBLE_RAD_PER_S) / 1000;
+  }
+
+  function showCrumbs(looseCrumbs: readonly number[], presentTick: number, nowTick: number): void {
     crumbBits.forEach((bits, boxIndex) => {
       const shownCount = crumbBitCount(looseCrumbs[boxIndex] ?? 0);
+      const landing = lastLanding && lastLanding.box === boxIndex && nowTick - lastLanding.tick < (hitStopMs(lastLanding.hitCount) + CRUMB_FLIGHT_MIN_MS) / tickMs ? lastLanding : null;
       bits.forEach((bit, bitIndex) => {
         const shouldShow = bitIndex < shownCount;
         if (shouldShow && !bit.isShown) {
-          bit.piece.reset(0);
-          bit.piece.set(1, 0);
+          if (landing) {
+            bit.piece.reset(1);
+            launchCrumb(bit, bitIndex, landing, presentTick);
+          } else {
+            bit.piece.reset(0);
+            bit.piece.set(1, 0);
+          }
         }
+        if (!shouldShow) bit.flight = null;
         bit.isShown = shouldShow;
         bit.piece.group.visible = shouldShow;
+        if (shouldShow) placeCrumb(bit, presentTick);
       });
     });
+  }
+
+  function playImpact(presentTick: number, nowTick: number): void {
+    const releaseTick = lastLanding ? lastLanding.tick + hitStopMs(lastLanding.hitCount) / tickMs : Number.POSITIVE_INFINITY;
+    const impactMs = lastLanding && nowTick >= releaseTick ? (presentTick - lastLanding.tick) * tickMs : -1;
+    const landing = lastLanding;
+    table.table.sway = deckDipRad(impactMs);
+    harness.target.y = baseTargetY - cameraDropUnits(impactMs);
+    boxes.forEach((box, boxIndex) => {
+      const distance = landing ? Math.abs(boxAlong(boxIndex, boxCount) - boxAlong(landing.box, boxCount)) : 0;
+      box.piece.sway = landing && boxIndex !== landing.box ? boxHopRad(impactMs, distance) : 0;
+      if (presentTick < revealStartTick) box.setLidOpen(landing && boxIndex === landing.box ? lidPopAmount(impactMs) : 0);
+    });
+    if (!landing || impactMs < 0 || landing.hasFlinched) return;
+    landing.hasFlinched = true;
+    for (const { seat, actor } of actors) {
+      const pose = director.poseOf(seat, presentTick);
+      if (pose.kind === "perched" && pose.at.box !== landing.box) actor.flinch(presentTick);
+    }
   }
 
   function playReveal(nowTick: number, dtSeconds: number): void {
@@ -234,7 +314,9 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     const view = director.view();
     const isAngry = director.latestRaises().some((raise) => nowTick >= raise.tick && nowTick < raise.landsTick + angryTicksAfterLanding);
     const potShare = startingPot > 0 && view.phase !== "lobby" ? view.pot / startingPot : 1;
-    whale.face.setMood(isAngry ? "angry" : moodGovernor.moodAt(potShare, nowMs), crowdedGlance(view, boxCount));
+    const missedBox = lastLanding && nowMs < missUntilMs ? lastLanding.box : null;
+    if (missedBox !== null) whale.face.setMood("alert", glanceTowardBox(missedBox, boxCount));
+    else whale.face.setMood(isAngry ? "angry" : moodGovernor.moodAt(potShare, nowMs), crowdedGlance(view, boxCount));
     whale.face.step(dtSeconds, nowMs);
   }
 
@@ -243,8 +325,20 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     moodGovernor.reset();
     whale.face.reset();
     revealOrder = null;
+    lastLanding = null;
+    previousPresentationTick = null;
+    missUntilMs = Number.NEGATIVE_INFINITY;
+    harness.target.y = baseTargetY;
+    table.table.sway = 0;
+    whale.whale.sway = 0;
+    for (const box of boxes) box.piece.sway = 0;
     for (const { actor } of actors) actor.reset();
-    for (const bits of crumbBits) for (const bit of bits) bit.isShown = false;
+    for (const bits of crumbBits) {
+      for (const bit of bits) {
+        bit.isShown = false;
+        bit.flight = null;
+      }
+    }
     for (const reveal of revealBoxes) {
       reveal.hasOpened = false;
       reveal.lidSpring.reset(0);
@@ -256,16 +350,24 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     const nowTick = ((timeSeconds - REPLAY_LEAD_S) * 1000) / tickMs;
     for (const event of director.advanceTo(Math.floor(nowTick))) {
       if (event.kind === "pecked" && event.outcome !== "emptyBox") actorBySeat.get(event.seat)?.peck(event.tick);
-      if (event.kind === "swatLanded" && event.hits.length >= SPOUT_MIN_HITS) whale.face.popSpout(timeSeconds * 1000);
+      if (event.kind === "swatLanded") {
+        lastLanding = { tick: event.tick, hitCount: event.hits.length, box: event.box, hitSeats: event.hits.map((hit) => hit.seat), hasFlinched: false };
+        if (event.hits.length >= SPOUT_MIN_HITS) whale.face.popSpout(event.tick * tickMs);
+        if (event.hits.length === 0) missUntilMs = event.tick * tickMs + MISS_LOOK_MS;
+      }
     }
+    const presentTick = presentationTick(nowTick, lastLanding, tickMs);
+    const presentDt = previousPresentationTick === null ? dtSeconds : Math.max(0, ((presentTick - previousPresentationTick) * tickMs) / 1000);
+    previousPresentationTick = presentTick;
     const beakCrumbsBySeat = new Map(director.view().seats.map((seatView) => [seatView.seat, seatView.beakCrumbs]));
     for (const { seat, actor, hover } of actors) {
-      actor.update(toPigeonPose(director.poseOf(seat, nowTick), hover, boxCount), nowTick, tickMs, dtSeconds);
+      actor.update(toPigeonPose(director.poseOf(seat, presentTick), hover, boxCount), presentTick, tickMs, presentDt);
       actor.showBeakCrumbs(beakCrumbsBySeat.get(seat) ?? 0);
     }
-    poseArms(nowTick);
-    actFace(nowTick, timeSeconds * 1000, dtSeconds);
-    showCrumbs(director.view().looseCrumbs);
-    playReveal(nowTick, dtSeconds);
+    poseArms(presentTick);
+    actFace(presentTick, presentTick * tickMs, presentDt);
+    showCrumbs(director.view().looseCrumbs, presentTick, nowTick);
+    playImpact(presentTick, nowTick);
+    playReveal(presentTick, presentDt);
   });
 }

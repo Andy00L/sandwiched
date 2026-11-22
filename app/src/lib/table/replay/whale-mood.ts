@@ -21,11 +21,15 @@ export function crowdedGlance(view: RoundViewState, boxCount: number): EyePair {
   }
   const mostPerched = Math.max(...perchedByBox);
   const crowdedBoxes = perchedByBox.flatMap((count, boxIndex) => (count === mostPerched && count > 0 ? [boxIndex] : []));
-  if (crowdedBoxes.length !== 1) return "down";
+  const [crowdedBox] = crowdedBoxes;
+  if (crowdedBoxes.length !== 1 || crowdedBox === undefined) return "down";
+  return glanceTowardBox(crowdedBox, boxCount);
+}
+
+export function glanceTowardBox(boxIndex: number, boxCount: number): EyePair {
   const middleBox = (boxCount - 1) / 2;
-  const [crowdedBox = middleBox] = crowdedBoxes;
-  if (crowdedBox < middleBox) return "left";
-  if (crowdedBox > middleBox) return "right";
+  if (boxIndex < middleBox) return "left";
+  if (boxIndex > middleBox) return "right";
   return "down";
 }
 

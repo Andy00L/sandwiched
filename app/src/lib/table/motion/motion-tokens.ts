@@ -8,6 +8,13 @@ export const BONK_TILT_RAD = 1.55;
 
 export const FLATTEN_MS = 80;
 
+export const HIT_STOP_BASE_MS = 50;
+export const HIT_STOP_PER_HIT_MS = 15;
+export const HIT_STOP_MAX_MS = 110;
+export const RIPPLE_S_PER_UNIT = 0.02;
+export const FLINCH_MS = 120;
+export const SWAT_STAR_FOLD_MS = 500;
+
 export const SLAM_RAISE_MS = 180;
 export const SLAM_DOWN_MS = 60;
 export const SLAM_HOLD_MS = 150;

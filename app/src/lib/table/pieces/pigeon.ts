@@ -378,7 +378,16 @@ function printPart(options: CardOptions, draw: PartDrawing, name: string): Pigeo
     print.parts((context, ink) => draw(context, ink));
     finishPart(print);
   };
-  const card = makeCard(outline, { ...options, paint, back: "kraft" });
+  const paintPressedSide: PaintFn = (print) => {
+    print.parts((context, ink) => {
+      context.save();
+      context.scale(-1, 1);
+      draw(context, ink);
+      context.restore();
+    });
+    finishPart(print);
+  };
+  const card = makeCard(outline, { ...options, paint, back: paintPressedSide, backRes: 0.6 });
   return { outline, materials: card.material };
 }
 
@@ -466,4 +475,30 @@ export function printCropBags(options: CardOptions): CropBagPrints {
     outline,
     materials: { empty: printStage("empty"), few: printStage("few"), half: printStage("half"), full: printStage("full"), bursting: printStage("bursting") },
   };
+}
+
+const STAR_OUTER_UNITS = 0.48;
+const STAR_INNER_UNITS = 0.21;
+
+function starOutline(): Point[] {
+  return [...Array(10).keys()].map((step): Point => {
+    const angle = Math.PI / 2 + (step / 10) * Math.PI * 2;
+    const radius = step % 2 === 0 ? STAR_OUTER_UNITS : STAR_INNER_UNITS;
+    return [Math.cos(angle) * radius, STAR_OUTER_UNITS + Math.sin(angle) * radius];
+  });
+}
+
+function paintStar(print: Print): void {
+  print.gradient(P2.shade(PALETTE.mustard, 0.14), P2.shade(PALETTE.mustard, -0.18), 0.3);
+  print.layer((context) => {
+    context.beginPath();
+    context.arc(0, STAR_OUTER_UNITS, 0.1, 0, Math.PI * 2);
+    context.fill();
+  }, PALETTE.creamCore, { depth: 0.5 });
+  print.felt(0.5);
+}
+
+export function printStunStar(options: CardOptions): PigeonPartPrint {
+  const outline = starOutline();
+  return { outline, materials: makeCard(outline, { ...options, paint: paintStar, back: "kraft" }).material };
 }

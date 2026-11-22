@@ -32,8 +32,15 @@ export function perchSpot(boxIndex: number, boxCount: number, slot: number): Per
   return { along: boxAlong(boxIndex, boxCount) + alongOffset, deckZ: BOX_ROW_DECK_Z + zOffset, facing };
 }
 
-export function hoverSpot(seat: number, seatCount: number): PerchSpot {
-  const usableLength = TABLE_LENGTH_UNITS - 4;
-  const along = -usableLength / 2 + ((seat + 0.5) / Math.max(1, seatCount)) * usableLength;
-  return { along, deckZ: BOX_ROW_DECK_Z + 0.6 - (seat % 2) * 2.2, facing: along < 0 ? "right" : "left" };
+const HOVER_GAP_CENTRES = [-1.5, -0.5, 0.5, 1.5].map((gap) => gap * BOX_SPACING_UNITS);
+const HOVER_ROWS = 2;
+const HOVER_SPREAD_UNITS = 0.9;
+
+export function hoverSpot(seat: number): PerchSpot {
+  const gap = HOVER_GAP_CENTRES[seat % HOVER_GAP_CENTRES.length] ?? 0;
+  const row = Math.floor(seat / HOVER_GAP_CENTRES.length) % HOVER_ROWS;
+  const layer = Math.floor(seat / (HOVER_GAP_CENTRES.length * HOVER_ROWS));
+  const spread = layer === 0 ? 0 : (layer % 2 === 1 ? 1 : -1) * Math.ceil(layer / 2) * HOVER_SPREAD_UNITS;
+  const along = Math.max(-TABLE_LENGTH_UNITS / 2 + 2, Math.min(TABLE_LENGTH_UNITS / 2 - 2, gap + spread));
+  return { along, deckZ: BOX_ROW_DECK_Z + 0.6 - row * 2.2, facing: along < 0 ? "right" : "left" };
 }
