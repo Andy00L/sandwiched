@@ -1,4 +1,3 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { Buffer } from "buffer";
 import { type AccountFeed, type FeedStatus, createAccountFeed } from "../src/lib/chain/account-feed";
@@ -8,7 +7,8 @@ import { createChainClient, createSponsoredFeePayment, fetchSponsorStatus } from
 import { ROLLUP_RPC_URL, ROLLUP_WS_URL, SPONSOR_REQUEST_TIMEOUT_MS, SPONSOR_ROUTE_PATH } from "../src/lib/chain/config";
 import { createDepositChain, createDepositQueue } from "../src/lib/chain/deposits";
 import { loadGuestKey } from "../src/lib/chain/guest-key";
-import { type KeyStore, createMemoryKeyStore } from "../src/lib/chain/key-store";
+import { createMemoryKeyStore } from "../src/lib/chain/key-store";
+import { createFileKeyStore } from "./file-key-store";
 import { claimTestUsdc, createSeatActions, sitAtTable } from "../src/lib/chain/player";
 import { type Result, attempt, attemptSync, failure, pollUntil, success } from "../src/lib/chain/result";
 import { fetchWithTimeout } from "../src/lib/chain/rpc";
@@ -27,23 +27,6 @@ const UNREACHABLE_WS_URL = "ws://127.0.0.1:9";
 type Observed<Snapshot> = { snapshot: Snapshot; receivedAtMs: number };
 
 const log = (message: string): void => console.log(`[devnetGuestCheck] ${message}`);
-
-const createFileKeyStore = (path: string): KeyStore => {
-  const readAll = (): Record<string, string> => {
-    if (!existsSync(path)) return {};
-    const parsed = attemptSync((): unknown => JSON.parse(readFileSync(path, "utf8")));
-    if (!parsed.ok || typeof parsed.value !== "object" || parsed.value === null) return {};
-    return Object.fromEntries(Object.entries(parsed.value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-  };
-  const writeAll = (values: Record<string, string>) => writeFileSync(path, JSON.stringify(values), { mode: 0o600 });
-  return {
-    isDurable: true,
-    read: (key) => readAll()[key] ?? null,
-    write: (key, value) => attemptSync(() => writeAll({ ...readAll(), [key]: value })).ok,
-    remove: (key) => attemptSync(() => writeAll(Object.fromEntries(Object.entries(readAll()).filter(([storedKey]) => storedKey !== key)))).ok,
-    listKeys: (prefix) => Object.keys(readAll()).filter((key) => key.startsWith(prefix)),
-  };
-};
 
 const roundMs = (value: number): number => Math.round(value * 10) / 10;
 

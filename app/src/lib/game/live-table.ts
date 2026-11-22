@@ -5,11 +5,11 @@ import { findSeatAddress } from "../chain/addresses";
 import { createChainClient, createSponsoredFeePayment } from "../chain/client";
 import { ROLLUP_RPC_URL, ROLLUP_WS_URL, SPONSOR_ROUTE_PATH } from "../chain/config";
 import { loadGuestKey } from "../chain/guest-key";
-import { createBrowserKeyStore } from "../chain/key-store";
+import { type KeyStore, createBrowserKeyStore } from "../chain/key-store";
 import { type SandwichProgram, createChainPrograms } from "../chain/program";
 import { type Result, attemptSync, failure, success } from "../chain/result";
 import { createRpcConnection } from "../chain/rpc";
-import { createKeypairSigner } from "../chain/transport";
+import { type FeePayment, createKeypairSigner } from "../chain/transport";
 import { LIVE_TIMING } from "./chain-rules";
 import { createGuestPlayChain } from "./guest-chain";
 import type { GuestStage } from "./guest-steps";
@@ -71,7 +71,7 @@ export function describeSettledRound(round: RecordedRound): string | null {
   });
 }
 
-function reportSettledRounds(store: TableStore): void {
+export function reportSettledRounds(store: TableStore): void {
   const reported = new Set<number>();
   const report = (live: LiveRound | null) => {
     if (live === null || reported.has(live.roundNumber)) return;
@@ -87,7 +87,7 @@ function reportSettledRounds(store: TableStore): void {
   });
 }
 
-const parseTableAddress = (tableAddressText: string): Result<PublicKey> => {
+export const parseTableAddress = (tableAddressText: string): Result<PublicKey> => {
   const table = attemptSync(() => new PublicKey(tableAddressText));
   return table.ok ? table : failure(`not a table address: ${tableAddressText}`);
 };
@@ -108,26 +108,22 @@ export async function openLiveRoundSource(tableAddressText: string, timeoutMs: n
   return source;
 }
 
-export type LivePlay = { source: RoundSource; player: TablePlayer; guest: PublicKey };
+export type GuestSeatSetup = { table: PublicKey; feePayment: FeePayment; keyStore: KeyStore; onStage: (stage: GuestStage) => void };
 
-export async function openLivePlay(tableAddressText: string, timeoutMs: number, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> {
-  const table = parseTableAddress(tableAddressText);
-  if (!table.ok) return failure(`[openLivePlay] ${table.reason}`);
-  const feePayment = await createSponsoredFeePayment(SPONSOR_ROUTE_PATH);
-  if (!feePayment.ok) return failure(`[openLivePlay] ${feePayment.reason}`);
-  const client = createChainClient(feePayment.value);
+export type GuestSeat = { store: TableStore; player: TablePlayer; guest: PublicKey; close: () => void };
+
+export async function seatGuest({ table, feePayment, keyStore, onStage }: GuestSeatSetup): Promise<Result<GuestSeat>> {
+  const client = createChainClient(feePayment);
   const program = client.programs.sandwich;
-  const tableSnapshot = await fetchTable(program, client.rollup, table.value);
-  if (!tableSnapshot.ok) return failure(`[openLivePlay] ${tableSnapshot.reason}`);
-  if (tableSnapshot.value === null) return failure(`[openLivePlay] no table at ${tableAddressText} on the rollup`);
-  const keyStore = createBrowserKeyStore();
+  const tableSnapshot = await fetchTable(program, client.rollup, table);
+  if (!tableSnapshot.ok) return failure(`[seatGuest] ${tableSnapshot.reason}`);
+  if (tableSnapshot.value === null) return failure(`[seatGuest] no table at ${table.toBase58()} on the rollup`);
   const wallet = createKeypairSigner(loadGuestKey(keyStore).keypair);
   const feed = createAccountFeed({ rpcUrl: ROLLUP_RPC_URL, wsUrl: ROLLUP_WS_URL });
   const store = createTableStore({ ownWallet: wallet.publicKey });
-  reportSettledRounds(store);
   let latestTable: TableSnapshot = tableSnapshot.value;
-  const stop = connectTableStore(store, { feed, program, table: table.value }, (snapshot) => (latestTable = snapshot));
-  const play = createGuestPlayChain({ client, wallet, table: table.value, tableSnapshot: tableSnapshot.value, keyStore });
+  const stopFeed = connectTableStore(store, { feed, program, table }, (snapshot) => (latestTable = snapshot));
+  const play = createGuestPlayChain({ client, wallet, table, tableSnapshot: tableSnapshot.value, keyStore });
   const player = startTablePlayer({
     store,
     actions: play.actions,
@@ -138,10 +134,26 @@ export async function openLivePlay(tableAddressText: string, timeoutMs: number, 
     readTable: () => latestTable,
     onStage,
   });
-  const source = await waitForLiveRoundSource(store, timeoutMs);
-  if (source.ok) return success({ source: source.value, player, guest: wallet.publicKey });
-  player.stop();
-  stop();
-  feed.close();
+  const close = () => {
+    player.stop();
+    stopFeed();
+    feed.close();
+  };
+  return success({ store, player, guest: wallet.publicKey, close });
+}
+
+export type LivePlay = { source: RoundSource; player: TablePlayer; guest: PublicKey };
+
+export async function openLivePlay(tableAddressText: string, timeoutMs: number, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> {
+  const table = parseTableAddress(tableAddressText);
+  if (!table.ok) return failure(`[openLivePlay] ${table.reason}`);
+  const feePayment = await createSponsoredFeePayment(SPONSOR_ROUTE_PATH);
+  if (!feePayment.ok) return failure(`[openLivePlay] ${feePayment.reason}`);
+  const seated = await seatGuest({ table: table.value, feePayment: feePayment.value, keyStore: createBrowserKeyStore(), onStage });
+  if (!seated.ok) return seated;
+  reportSettledRounds(seated.value.store);
+  const source = await waitForLiveRoundSource(seated.value.store, timeoutMs);
+  if (source.ok) return success({ source: source.value, player: seated.value.player, guest: seated.value.guest });
+  seated.value.close();
   return source;
 }

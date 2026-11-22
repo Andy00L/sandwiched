@@ -1,7 +1,7 @@
 import type { PublicKey } from "@solana/web3.js";
 import type { TableSnapshot } from "../chain/accounts";
 import type { RollupAck } from "../chain/transport";
-import { type ClickTarget, intentForClick } from "./click-intent";
+import { type ClickTarget, type PlayerIntent, intentForClick } from "./click-intent";
 import { type Crank, chooseCrank, describeCrank } from "./cranks";
 import { type GuestChain, type GuestNeeds, type GuestStage, prepareGuest } from "./guest-steps";
 import type { RoundTiming } from "./round-events";
@@ -20,8 +20,8 @@ export type PlayerActions = {
   peck: () => Promise<RollupAck>;
   raiseHand: (boxIndex: number) => Promise<RollupAck>;
   startRound: () => Promise<RollupAck>;
-  landSwat: (wallets: PublicKey[]) => Promise<RollupAck>;
-  settle: (wallets: PublicKey[]) => Promise<RollupAck>;
+  landSwat: (seats: PublicKey[]) => Promise<RollupAck>;
+  settle: (seats: PublicKey[]) => Promise<RollupAck>;
 };
 
 export type TablePlayerPorts = {
@@ -35,7 +35,7 @@ export type TablePlayerPorts = {
   onStage: (stage: GuestStage) => void;
 };
 
-export type TablePlayer = { click: (target: ClickTarget) => void; stop: () => void };
+export type TablePlayer = { click: (target: ClickTarget) => void; perform: (intent: PlayerIntent) => void; stop: () => void };
 
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
@@ -55,9 +55,9 @@ function sendCrank(actions: PlayerActions, crank: Crank): Promise<RollupAck> {
     case "startRound":
       return actions.startRound();
     case "settle":
-      return actions.settle(crank.wallets);
+      return actions.settle(crank.seats);
     case "landSwat":
-      return actions.landSwat(crank.wallets);
+      return actions.landSwat(crank.seats);
   }
 }
 
@@ -122,11 +122,8 @@ export function startTablePlayer(ports: TablePlayerPorts): TablePlayer {
     isStopped: () => isStopped,
   });
 
-  const click = (target: ClickTarget) => {
-    const live = store.getSnapshot().live;
-    if (live === null || stage.kind !== "ready") return;
-    const intent = intentForClick(live.view, store.getSnapshot().ownSeat, target);
-    if (intent === null) return;
+  const perform = (intent: PlayerIntent) => {
+    if (stage.kind !== "ready") return;
     if (intent.actor === "whale") {
       void actions.raiseHand(intent.box).then((ack) => report("raiseHand", ack));
       return;
@@ -134,8 +131,16 @@ export function startTablePlayer(ports: TablePlayerPorts): TablePlayer {
     void store.perform(intent.intent, () => sendIntent(actions, intent.intent)).then((ack) => report(intent.intent.kind, ack));
   };
 
+  const click = (target: ClickTarget) => {
+    const snapshot = store.getSnapshot();
+    if (snapshot.live === null) return;
+    const intent = intentForClick(snapshot.live.view, snapshot.ownSeat, target);
+    if (intent !== null) perform(intent);
+  };
+
   return {
     click,
+    perform,
     stop: () => {
       isStopped = true;
       clearInterval(decideTimer);

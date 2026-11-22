@@ -76,7 +76,8 @@ export function createGuestPlayChain({ client, wallet, table, tableSnapshot, key
       case "deposit": {
         if (deposits.listPending().length > 0) {
           const recovered = await deposits.recoverPending();
-          return success(recovered.map((outcome) => `${outcome.shuttleId}:${outcome.state}`).join(", "));
+          const merged = recovered.filter((outcome) => outcome.state === "merged" || outcome.state === "landed");
+          if (merged.length > 0) return success(merged.map((outcome) => `${outcome.shuttleId}:${outcome.state}`).join(", "));
         }
         const deposited = await deposits.deposit(needs.unitsPerBuyIn);
         return deposited.ok ? success(deposited.value.signature) : deposited;
