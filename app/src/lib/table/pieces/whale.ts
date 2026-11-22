@@ -9,6 +9,7 @@ import { buildWhaleFace, HEAD_BASE_UNITS, HEAD_HEIGHT_UNITS, LAYER_GAP_UNITS, ro
 import type { WhaleFace } from "./whale-face";
 import { FOREARM_UNITS, UPPER_ARM_UNITS, poseArm } from "../replay/arm-rig";
 import type { ArmRig } from "../replay/arm-rig";
+import { markMoving } from "../stage/hidden-backs";
 
 const SEAT_HEIGHT_UNITS = 2.3;
 const TORSO_WIDTH_UNITS = 16.8;
@@ -298,6 +299,7 @@ export function buildWhale(harness: Harness, worldX: number, worldZ: number, yaw
   };
   const leftArm = buildArm(-1);
   const rightArm = buildArm(1);
+  markMoving(group);
   const whale = harness.popup(null, null, { node: group, height: WHALE_HEIGHT_UNITS, x: worldX, z: worldZ, yaw, level: true });
   return { whale, group, face, leftArm, rightArm };
 }

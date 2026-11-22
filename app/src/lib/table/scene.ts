@@ -52,6 +52,7 @@ import { buildReplayScene } from "./replay/replay-scene";
 import { recordFrameTimes } from "./stage/frame-recorder";
 import { buildParkLife } from "./stage/park-life";
 import { printParkGround } from "./stage/park-ground";
+import { trimHiddenBacksOnceRisen } from "./stage/hidden-backs";
 import { probeQualityTier, storedQuality } from "./stage/quality-probe";
 import { PAPER_STOCK, PARK_LENS, PARK_LIGHT, PARK_TEST_VIEW, PARK_VIEW, SCENE_FOCUS, TABLE_YAW_RAD, TEST_CARD_SPOT } from "./stage/look";
 
@@ -180,6 +181,7 @@ export async function buildTableScene(): Promise<void> {
   harness.printGround((tools) => printParkGround(tools, harness.bounds));
   if (harness.flags.TEST) buildTestCards(harness);
   else buildPark(harness, mode);
+  trimHiddenBacksOnceRisen(harness);
   harness.start();
   probeQualityTier(harness);
   holdAtRequestedTime();

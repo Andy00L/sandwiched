@@ -9,6 +9,7 @@ import { BONK_TILT_RAD, CREASE_MS, FLATTEN_MS, FLINCH_MS, HOVER_BOB_HZ, HOVER_BO
 import { flightPlacement, peckDepth } from "../motion/pigeon-clips";
 import { applyFlip, stepFlip } from "../motion/verbs";
 import type { FlipTarget } from "../motion/verbs";
+import { createBackToggle, markMoving } from "../stage/hidden-backs";
 import { TABLE_YAW_RAD } from "../stage/look";
 import type { Facing, PerchSpot } from "./perches";
 import { createBodyMemory, stepBody } from "./pigeon-body";
@@ -26,6 +27,7 @@ const APPEAR_SPRING_SIZE = 0.3;
 const SWAT_WHIP_SPRING_SIZE = 0.47;
 const HIDDEN_BELOW_OPEN = 0.02;
 const FOLDED_LIFT_UNITS = 0.32;
+const BACKS_HIDDEN_BELOW_FOLD_RAD = 0.02;
 const STAR_SPOTS: ReadonlyArray<readonly [number, number]> = [
   [-2.9, 2.9],
   [0.1, 0.4],
@@ -72,6 +74,7 @@ export function createPigeonActor(
   const cardOptions = harness.cardOpts(0, 0, 1, deck);
   const puppet = buildPigeonPuppet(prints.kit, prints.cropBags, cardOptions, `pigeon seat ${seat}`);
   const { tongue, crease } = attachPressedProps(puppet, prints.kit, prints.pressed, cardOptions, `pigeon seat ${seat}`);
+  const backs = createBackToggle(puppet.root);
   const turnPivot = new THREE.Group();
   const tiltPivot = new THREE.Group();
   const foldPivot = new THREE.Group();
@@ -79,6 +82,7 @@ export function createPigeonActor(
   turnPivot.add(tiltPivot);
   foldPivot.add(turnPivot);
   const piece = harness.popup(null, null, { node: foldPivot, height: 3.6, parent: deck, x: 0, z: 0, yaw: 0, order, level: true });
+  markMoving(piece.group);
 
   let flip = 1;
   turnPivot.rotation.y = -TABLE_YAW_RAD;
@@ -133,6 +137,7 @@ export function createPigeonActor(
 
   function liftOffDeckWhileFolded(): void {
     piece.group.position.y += Math.min(1, Math.abs(foldPivot.rotation.x) / FLAT_RAD) * FOLDED_LIFT_UNITS;
+    backs.setBacksDrawn(Math.abs(foldPivot.rotation.x) > BACKS_HIDDEN_BELOW_FOLD_RAD);
   }
 
   function performBodyCommand(command: BodyCommand, nowTick: number, tickMs: number): void {

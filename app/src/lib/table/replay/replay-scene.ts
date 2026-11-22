@@ -27,6 +27,7 @@ import type { PigeonKit, PigeonVariant } from "../pieces/pigeon";
 import type { PicnicTable } from "../pieces/table";
 import { restHandPosition, TOWARD_CAMERA_IN_WHALE } from "../pieces/whale";
 import type { WhaleModel } from "../pieces/whale";
+import { markMoving } from "../stage/hidden-backs";
 import { SCENE_FOCUS } from "../stage/look";
 import { poseArm } from "./arm-rig";
 import type { ArmRig } from "./arm-rig";
@@ -149,6 +150,7 @@ function buildCrumbBits(harness: Harness, deck: THREE.Object3D, boxCount: number
       const homeDeckZ = BOX_ROW_DECK_Z + 0.3 + random() * 1.5;
       const homeYaw = (random() - 0.5) * 1.2;
       const piece = harness.popup(outline, null, { materials, parent: deck, x: homeAlong, z: homeDeckZ, yaw: homeYaw, order: order + bitIndex * 0.01 });
+      markMoving(piece.group);
       piece.group.visible = false;
       return { piece, isShown: false, homeAlong, homeDeckZ, homeYaw, flight: null };
     });
@@ -167,6 +169,7 @@ function buildRevealBoxes(harness: Harness, deck: THREE.Object3D, boxes: readonl
         ? harness.popup(sandwichOutline, paintSandwich, placement)
         : harness.popup(mothOutline, null, { ...placement, materials: mothMaterials });
     prop.group.visible = false;
+    markMoving(prop.group);
     return { box, prop, lidSpring: new FlapSpring({ p: 0, size: 0.35 }), hasOpened: false };
   });
 }

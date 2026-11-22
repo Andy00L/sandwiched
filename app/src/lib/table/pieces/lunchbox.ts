@@ -3,6 +3,7 @@ import type { Harness, PlacedPiece } from "papercraft/harness.js";
 import * as P2 from "papercraft/lib/paperkit-2d.js";
 import type { PaintFn, Point, Print } from "papercraft/lib/paperkit-2d.js";
 import { prismFold } from "papercraft/lib/paperkit-3d.js";
+import { markMoving } from "../stage/hidden-backs";
 import { PIGEON_HEIGHT_UNITS } from "../stage/look";
 import { PALETTE } from "../palette";
 
@@ -189,6 +190,7 @@ export function buildLunchbox(harness: Harness, look: LunchboxLook, boxIndex: nu
   const lid = lidTop.parent;
   const followFold = box.userData.follow;
   const node = new THREE.Group();
+  markMoving(node);
   box.rotation.y = Math.PI;
   node.add(box);
   let closedLidAngle = lid.rotation.x;

@@ -3,6 +3,7 @@ import { makeCard } from "papercraft/lib/paperkit-3d.js";
 import type { CardOptions } from "papercraft/lib/paperkit-3d.js";
 import { FEATHER_DRIFT_MS } from "../motion/motion-tokens";
 import type { PigeonPartPrint } from "../pieces/pigeon";
+import { markMoving } from "../stage/hidden-backs";
 import { TABLE_YAW_RAD } from "../stage/look";
 
 const FEATHER_POOL_SIZE = 40;
@@ -78,6 +79,7 @@ export function buildFeatherPool(print: PigeonPartPrint, options: CardOptions, d
     node.rotation.order = "YXZ";
     node.visible = false;
     node.add(card);
+    markMoving(node);
     deck.add(node);
     return { node, flight: null };
   });
