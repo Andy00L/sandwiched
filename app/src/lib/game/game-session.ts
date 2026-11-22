@@ -1,4 +1,5 @@
 import * as P2 from "papercraft/lib/paperkit-2d.js";
+import { installGameAudio, readGameAudio } from "../audio/game-audio";
 import { PALETTE } from "../table/palette";
 import type { SignpostLook } from "../table/pieces/signpost";
 import { loadRecordedRound } from "../table/replay/recorded-rounds";
@@ -93,12 +94,15 @@ export function createGameSession(): GameSession {
   const switchable = createSwitchableSource(EMPTY_SOURCE, LIVE_PLAYERS);
   let isLive = false;
   const controller = createPlayController({
-    onLiveSource: (source) => {
+    onLiveSource: (source, readOwnSeat) => {
       isLive = true;
       switchable.switchTo(source);
+      readGameAudio().followOwnSeat(readOwnSeat);
     },
+    onMuteKey: () => readGameAudio().toggleMute(),
   });
   const start = () => {
+    installGameAudio();
     installPaperTexture();
     window.addEventListener("keydown", controller.handleKey);
     void loadRecordedRound(ATTRACT_ROUND).then((loaded) => {

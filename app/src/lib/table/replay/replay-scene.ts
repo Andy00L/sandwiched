@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { Harness, PlacedPiece } from "papercraft/harness.js";
 import * as P2 from "papercraft/lib/paperkit-2d.js";
 import { FlapSpring } from "papercraft/lib/paperkit-3d.js";
+import { readGameAudio } from "../../audio/game-audio";
 import type { RoundSource } from "../../game/round-source";
 import type { HandRaisedEvent, RecordedRound } from "../../game/round-events";
 import { viewStateAt } from "../../game/view-state";
@@ -429,6 +430,7 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     for (const [rank, reveal] of revealOrder.entries()) {
       if (!reveal.hasOpened && nowTick >= revealStartTick + rank * lidStaggerTicks) {
         reveal.hasOpened = true;
+        readGameAudio().hearLidOpened(reveal.boxIndex, nowTick);
         reveal.lidSpring.set(1);
         reveal.prop.reset(0);
         reveal.prop.set(1, REVEAL_PROP_DELAY_S);
@@ -464,6 +466,7 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
 
   function resetStage(): void {
     director.reset();
+    readGameAudio().beginRound(round);
     moodGovernor.reset();
     whale.face.reset();
     startingPot = startingPotOf(round);
@@ -518,12 +521,14 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     resetStage();
   }
 
+  readGameAudio().beginRound(round);
   harness.onRestart(resetStage);
 
   harness.onStep((timeSeconds, dtSeconds) => {
     const nowTick = source.tickAt(timeSeconds);
     followLatestRound(nowTick);
     for (const event of director.advanceTo(Math.floor(nowTick))) {
+      readGameAudio().hear(event);
       if (event.kind === "pecked" && event.outcome !== "emptyBox") actorBySeat.get(event.seat)?.peck(event.tick);
       if (event.kind === "whaleDrawn") startingPot = startingPotOf(round);
       if (event.kind === "settled") {
@@ -564,5 +569,6 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     playReveal(presentTick, presentDt);
     const endTick = view.endTick;
     timer.pose(timerSweep(presentTick, endTick, timing.roundTicks), endTick === null ? 0 : timerKickRad((endTick - presentTick) * tickMs));
+    readGameAudio().atFrame(nowTick, presentTick, endTick);
   });
 }

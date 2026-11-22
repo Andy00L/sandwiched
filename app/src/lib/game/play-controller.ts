@@ -32,7 +32,7 @@ export type PlayController = {
   handleKey: (event: KeyboardEvent) => void;
 };
 
-export type PlayControllerPorts = { onLiveSource: (source: RoundSource) => void };
+export type PlayControllerPorts = { onLiveSource: (source: RoundSource, readOwnSeat: () => number | null) => void; onMuteKey: () => void };
 
 const openListedTable = (table: TableListing, buyInChips: bigint, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> => {
   if (table.kind === "practice") return openPracticePlay(PLAY_WAIT_MS, "whenAsked", onStage);
@@ -94,7 +94,7 @@ export function createPlayController(ports: PlayControllerPorts): PlayController
       return;
     }
     play = opened.value;
-    ports.onLiveSource(opened.value.source);
+    ports.onLiveSource(opened.value.source, () => opened.value.store.getSnapshot().ownSeat);
     opened.value.player.anteNextRound();
     watchRounds(opened.value);
   };
@@ -137,6 +137,7 @@ export function createPlayController(ports: PlayControllerPorts): PlayController
   const handleKey = (event: KeyboardEvent) => {
     if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.code === "KeyH") return dispatch({ kind: "toggleDrawer", drawer: "help" });
+    if (event.code === "KeyM") return ports.onMuteKey();
     if (event.code === "Escape") return dispatch(state.drawer === null ? { kind: "toggleDrawer", drawer: "settings" } : { kind: "closeDrawer" });
     if (event.code === "Enter" && state.flow.kind === "table" && state.flow.overlay.kind === "results") return anteAgain();
     const box = BOX_KEYS[event.code];
