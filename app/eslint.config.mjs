@@ -25,6 +25,17 @@ const BANNED_IN_LIB = [
   },
 ];
 
+const SCALE_ONLY_IN_VERBS = [
+  {
+    selector: "AssignmentExpression[left.object.property.name='scale']",
+    message: "Nothing scales outside the paper verbs (plan/07 section 12, item 7). Use src/lib/table/motion/verbs.ts.",
+  },
+  {
+    selector: "CallExpression[callee.object.property.name='scale']",
+    message: "Nothing scales outside the paper verbs (plan/07 section 12, item 7). Use src/lib/table/motion/verbs.ts.",
+  },
+];
+
 export default defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -53,6 +64,13 @@ export default defineConfig([
     files: ["src/lib/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-syntax": ["error", ...BANNED_IN_LIB],
+    },
+  },
+  {
+    files: ["src/lib/table/**/*.ts"],
+    ignores: ["src/lib/table/motion/verbs.ts"],
+    rules: {
+      "no-restricted-syntax": ["error", ...BANNED_IN_LIB, ...SCALE_ONLY_IN_VERBS],
     },
   },
 ]);

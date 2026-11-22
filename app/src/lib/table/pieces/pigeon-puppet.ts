@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { Harness, PlacedPiece } from "papercraft/harness.js";
 import { makeCard } from "papercraft/lib/paperkit-3d.js";
 import type { CardOptions } from "papercraft/lib/paperkit-3d.js";
+import { applyFlip } from "../motion/verbs";
 import { TABLE_YAW_RAD } from "../stage/look";
 import { LEG_TOP_UNITS } from "./pigeon";
 import type { CropBagPrints, CropBagStage, PigeonKit, PigeonPartPrint } from "./pigeon";
@@ -97,7 +98,7 @@ export function placeStandingPigeon(
   const puppet = buildPigeonPuppet(kit, cropBags, harness.cardOpts(placement.along, placement.deckZ, 1, deck), placement.name);
   const turn = new THREE.Group();
   turn.rotation.y = deck ? -TABLE_YAW_RAD : 0;
-  turn.scale.x = placement.facing === "left" ? -1 : 1;
+  applyFlip(turn, placement.facing === "left" ? -1 : 1);
   turn.add(puppet.root);
   return harness.popup(null, null, { node: turn, height: PIGEON_STANDING_HEIGHT_UNITS, parent: deck, x: placement.along, z: placement.deckZ, yaw: 0, order: placement.order, level: true });
 }

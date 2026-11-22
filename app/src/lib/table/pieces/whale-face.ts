@@ -425,16 +425,9 @@ export function buildWhaleFace(group: THREE.Group, options: CardOptions): WhaleF
   jaw.position.set(-JAW_LEFT_UNITS, -mouthLineY(JAW_LEFT_UNITS), 0);
 
   const spoutOutlineShared = spoutOutline();
-  const spouts: HingeHandle[] = (
-    [
-      [-4.4, 0.85],
-      [-2.4, 1.15],
-      [-0.4, 0.95],
-    ] as const
-  ).map(([headX, scale], spoutIndex) => {
+  const spouts: HingeHandle[] = [-4.4, -2.4, -0.4].map((headX, spoutIndex) => {
     const puff = new THREE.Group();
     placeCard(puff, spoutOutlineShared, paintSpout, { ...options, seed: 761 + spoutIndex }, `whale spout ${spoutIndex}`);
-    puff.scale.setScalar(scale);
     const handle = hinge(puff, { at: new THREE.Vector3(headX, HEAD_BASE_UNITS + HEAD_HEIGHT_UNITS - 0.5, HEAD_Z_UNITS - LAYER_GAP_UNITS * 1.5), open: 0, flat: -Math.PI, rest: 0, size: 0.2 });
     group.add(handle.group);
     return handle;
