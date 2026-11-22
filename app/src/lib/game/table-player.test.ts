@@ -72,6 +72,7 @@ describe("startTablePlayer", () => {
       readTable: () => table,
       onStage: () => undefined,
       isCranking: true,
+      antePolicy: "everyRound",
     });
     await advanceFakeTime(2_000, 50);
     expect(calls.filter((call) => call === "ante")).toHaveLength(1);
@@ -95,6 +96,7 @@ describe("startTablePlayer", () => {
       readTable: () => table,
       onStage: () => undefined,
       isCranking: true,
+      antePolicy: "everyRound",
     });
     await advanceFakeTime(2_000, 50);
     expect(calls.filter((call) => call.startsWith("settle"))).toEqual(["settle:3"]);
@@ -117,9 +119,36 @@ describe("startTablePlayer", () => {
       readTable: () => table,
       onStage: () => undefined,
       isCranking: false,
+      antePolicy: "everyRound",
     });
     await advanceFakeTime(2_000, 50);
     expect(calls).toEqual([]);
+    player.stop();
+  });
+
+  test("a player who antes when asked antes once after the ask, then waits for the next ask", async () => {
+    const { actions, calls } = createRecordingActions();
+    let table: TableSnapshot = buildTableSnapshot({ seats, antedSeatIndexes: [0], phase: { state: "lobby", firstAnteTick: 100n }, roundNumber: 4n });
+    const player = startTablePlayer({
+      store: createStubStore(150),
+      actions,
+      guest: readyGuest,
+      needs: { chipsToPlay: 100n, unitsPerBuyIn: 1n },
+      wallet: OWN_WALLET,
+      timing: LIVE_TIMING,
+      readTable: () => table,
+      onStage: () => undefined,
+      isCranking: false,
+      antePolicy: "whenAsked",
+    });
+    await advanceFakeTime(1_000, 50);
+    expect(calls).toEqual([]);
+    player.anteNextRound();
+    await advanceFakeTime(1_000, 50);
+    expect(calls).toEqual(["ante"]);
+    table = { ...table, roundNumber: 5n };
+    await advanceFakeTime(1_000, 50);
+    expect(calls).toEqual(["ante"]);
     player.stop();
   });
 });

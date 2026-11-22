@@ -1,7 +1,5 @@
-export default function Home() {
-  return (
-    <main>
-      <h1>Sandwich</h1>
-    </main>
-  );
+import { GameScreenLoader } from "@/components/game/GameScreenLoader";
+
+export default function HomePage() {
+  return <GameScreenLoader />;
 }

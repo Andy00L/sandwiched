@@ -81,6 +81,17 @@ export interface Print {
 export type PaintFn = (print: Print) => void;
 
 export function rng(seed?: number): Rng;
+export function paperSheet(options?: {
+  size?: number;
+  color?: string;
+  seed?: number;
+  fibres?: number;
+  mottle?: number;
+  grain?: number;
+  tooth?: number;
+  inclusions?: number;
+  direction?: number;
+}): HTMLCanvasElement;
 export function shade(color: string, amount: number): string;
 export function mix(colorA: string, colorB: string, amount: number): string;
 export function rgba(color: string, alpha: number): string;

@@ -1,0 +1,146 @@
+import { loadGuestKey } from "../chain/guest-key";
+import { createBrowserKeyStore } from "../chain/key-store";
+import type { Result } from "../chain/result";
+import { ROLE_SHEET_S, revealSheetDelayS } from "../table/motion/motion-tokens";
+import { readPigeonBox } from "./chain-rules";
+import type { ClickTarget } from "./click-intent";
+import type { GuestStage } from "./guest-steps";
+import { type LivePlay, openLivePlay } from "./live-table";
+import { type Drawer, INITIAL_PLAY_STATE, type PlayEvent, type PlayState, type Role, isTableOpenForPlay, stepPlay, summarizeRound } from "./play-flow";
+import { openPracticePlay } from "./practice-table";
+import type { RoundSource } from "./round-source";
+import type { TableListing } from "./table-listings";
+
+const PLAY_WAIT_MS = 120_000;
+const BOX_KEYS: Readonly<Record<string, number>> = { Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 };
+const TAKE_OFF_KEYS = new Set(["KeyW", "ArrowUp"]);
+
+export type PlayController = {
+  subscribe: (listener: () => void) => () => void;
+  getSnapshot: () => PlayState;
+  pickTable: (table: TableListing) => void;
+  goHome: () => void;
+  playNow: (buyInChips: bigint) => void;
+  anteAgain: () => void;
+  toggleDrawer: (drawer: Drawer) => void;
+  closeDrawer: () => void;
+  clickTable: (target: ClickTarget) => void;
+  handleKey: (event: KeyboardEvent) => void;
+};
+
+export type PlayControllerPorts = { onLiveSource: (source: RoundSource) => void };
+
+const openListedTable = (table: TableListing, buyInChips: bigint, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> => {
+  if (table.kind === "practice") return openPracticePlay(PLAY_WAIT_MS, "whenAsked", onStage);
+  const keyStore = createBrowserKeyStore();
+  const guestKey = loadGuestKey(keyStore).keypair;
+  return openLivePlay({ table: table.address, keyStore, guestKey, timeoutMs: PLAY_WAIT_MS, buyInChips, antePolicy: "whenAsked", onStage, startCompanions: null });
+};
+
+export function createPlayController(ports: PlayControllerPorts): PlayController {
+  let state = INITIAL_PLAY_STATE;
+  let play: LivePlay | null = null;
+  const listeners = new Set<() => void>();
+
+  const dispatch = (event: PlayEvent) => {
+    const next = stepPlay(state, event);
+    if (next === state) return;
+    state = next;
+    for (const listener of listeners) listener();
+  };
+
+  const showRole = (roundNumber: number, role: Role) => {
+    if (state.lastRoleRound === roundNumber) return;
+    dispatch({ kind: "roundLive", roundNumber, role });
+    setTimeout(() => dispatch({ kind: "roleSeen", roundNumber }), ROLE_SHEET_S * 1000);
+  };
+
+  const watchRounds = (opened: LivePlay) => {
+    const playedRounds = new Set<number>();
+    const settledRounds = new Set<number>();
+    const boxCount = opened.source.boxCount;
+    opened.store.subscribe(() => {
+      const { live, previous, ownSeat } = opened.store.getSnapshot();
+      if (ownSeat === null) return;
+      for (const round of [previous, live]) {
+        if (round === null) continue;
+        const seat = round.view.seats.find((candidate) => candidate.seat === ownSeat);
+        if (round.view.phase === "live" && seat?.presence === "anted") {
+          playedRounds.add(round.roundNumber);
+          showRole(round.roundNumber, seat.role);
+        }
+        if (round.view.phase !== "settled" || !playedRounds.has(round.roundNumber) || settledRounds.has(round.roundNumber)) continue;
+        const summary = summarizeRound(round.roundNumber, round.round, ownSeat);
+        if (summary === null) continue;
+        settledRounds.add(round.roundNumber);
+        setTimeout(() => dispatch({ kind: "roundSettled", summary }), revealSheetDelayS(boxCount) * 1000);
+      }
+    });
+  };
+
+  const playNow = async (buyInChips: bigint) => {
+    if (state.flow.kind !== "seat" || state.flow.sheet.phase === "seating") return;
+    const table = state.flow.table;
+    dispatch({ kind: "playNow" });
+    const opened = await openListedTable(table, buyInChips, (stage) => dispatch({ kind: "seatStage", stage }));
+    if (!opened.ok) {
+      console.warn(`[playNow] ${opened.reason}`);
+      dispatch({ kind: "seatStage", stage: { kind: "failed", step: "sit", reason: opened.reason } });
+      return;
+    }
+    play = opened.value;
+    ports.onLiveSource(opened.value.source);
+    opened.value.player.anteNextRound();
+    watchRounds(opened.value);
+  };
+
+  const clickTable = (target: ClickTarget) => {
+    if (play === null || !isTableOpenForPlay(state)) return;
+    dispatch({ kind: "acted" });
+    play.player.click(target);
+  };
+
+  const clickOwnBox = () => {
+    if (play === null) return;
+    const { live, ownSeat } = play.store.getSnapshot();
+    const seat = live?.view.seats.find((candidate) => candidate.seat === ownSeat);
+    const box = seat === undefined ? null : readPigeonBox(seat.pigeon);
+    if (box !== null) clickTable({ kind: "box", box });
+  };
+
+  const anteAgain = () => {
+    if (state.flow.kind !== "table" || state.flow.overlay.kind !== "results") return;
+    dispatch({ kind: "anteAgain" });
+    play?.player.anteNextRound();
+  };
+
+  const handleKey = (event: KeyboardEvent) => {
+    if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.code === "KeyH") return dispatch({ kind: "toggleDrawer", drawer: "help" });
+    if (event.code === "Escape") return dispatch(state.drawer === null ? { kind: "toggleDrawer", drawer: "settings" } : { kind: "closeDrawer" });
+    if (event.code === "Enter" && state.flow.kind === "table" && state.flow.overlay.kind === "results") return anteAgain();
+    const box = BOX_KEYS[event.code];
+    if (box !== undefined) return clickTable({ kind: "box", box });
+    if (event.code === "Space") {
+      event.preventDefault();
+      return clickOwnBox();
+    }
+    if (TAKE_OFF_KEYS.has(event.code)) clickTable({ kind: "ground" });
+  };
+
+  return {
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    getSnapshot: () => state,
+    pickTable: (table) => dispatch({ kind: "pickTable", table }),
+    goHome: () => dispatch({ kind: "goHome" }),
+    playNow: (buyInChips) => void playNow(buyInChips),
+    anteAgain,
+    toggleDrawer: (drawer) => dispatch({ kind: "toggleDrawer", drawer }),
+    closeDrawer: () => dispatch({ kind: "closeDrawer" }),
+    clickTable,
+    handleKey,
+  };
+}

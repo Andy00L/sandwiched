@@ -68,7 +68,7 @@ type RoundState = { roundNumber: number; header: RecordedRound; events: RoundEve
 
 type Prediction = { event: PredictedEvent; afterTick: number; expiresTick: number; roundNumber: number };
 
-function describeLivePlayer(seat: number): RoundPlayer {
+export function describeLivePlayer(seat: number): RoundPlayer {
   const baseName = PIGEON_NAMES[seat % PIGEON_NAMES.length] ?? PIGEON_NAMES[0];
   const repeat = Math.floor(seat / PIGEON_NAMES.length);
   return {

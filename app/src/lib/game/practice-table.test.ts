@@ -20,13 +20,18 @@ const firstListing = listTestTable(50n);
 const secondListing = listTestTable(51n);
 
 describe("chooseBotDriver", () => {
-  test("is the human in the lowest seat, skipping bots seated before them", () => {
+  test("is the lowest seat among humans who anted and this browser's own guest", () => {
     const seats = seatAt([[0, BOTS[0] ?? GUEST], [3, OTHER_HUMAN], [5, GUEST], [7, BOTS[1] ?? GUEST]]);
-    expect(chooseBotDriver(seats, BOTS)?.equals(OTHER_HUMAN)).toBe(true);
+    expect(chooseBotDriver({ seats, antedSeatIndexes: [0, 3, 5] }, BOTS, GUEST)?.equals(OTHER_HUMAN)).toBe(true);
+  });
+
+  test("passes over a human who left without anteing, so a gone visitor never blocks the bots", () => {
+    const seats = seatAt([[0, BOTS[0] ?? GUEST], [3, OTHER_HUMAN], [5, GUEST]]);
+    expect(chooseBotDriver({ seats, antedSeatIndexes: [0] }, BOTS, GUEST)?.equals(GUEST)).toBe(true);
   });
 
   test("is nobody while only bots sit", () => {
-    expect(chooseBotDriver(seatAt([[0, BOTS[0] ?? GUEST]]), BOTS)).toBeNull();
+    expect(chooseBotDriver({ seats: seatAt([[0, BOTS[0] ?? GUEST]]), antedSeatIndexes: [0] }, BOTS, GUEST)).toBeNull();
   });
 });
 

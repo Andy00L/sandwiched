@@ -10,7 +10,7 @@ import { restoreKeypair } from "../src/lib/chain/guest-key";
 import type { KeyStore } from "../src/lib/chain/key-store";
 import { type Result, attempt, attemptSync, failure, success } from "../src/lib/chain/result";
 import { type TransactionSigner, createKeypairSigner, sendOnBase } from "../src/lib/chain/transport";
-import { createGuestPlayChain } from "../src/lib/game/guest-chain";
+import { DEFAULT_BUY_IN_CHIPS, createGuestPlayChain } from "../src/lib/game/guest-chain";
 import { prepareGuest } from "../src/lib/game/guest-steps";
 import { derivePracticeBotKeys } from "../src/lib/game/practice-table";
 import { ALL_TABLES, type TableListing } from "../src/lib/game/table-listings";
@@ -63,7 +63,7 @@ async function seatPracticeBots(client: ChainClient, admin: TransactionSigner, l
       continue;
     }
     const wallet = createKeypairSigner(bot);
-    const play = createGuestPlayChain({ client, wallet, table: listing.address, tableSnapshot: tableSnapshot.value, keyStore, signsWith: "wallet" });
+    const play = createGuestPlayChain({ client, wallet, table: listing.address, tableSnapshot: tableSnapshot.value, keyStore, signsWith: "wallet", buyInChips: DEFAULT_BUY_IN_CHIPS });
     const stage = await prepareGuest(play.guest, {
       needs: play.needs,
       maxAttemptsPerStep: MAX_ATTEMPTS_PER_STEP,

@@ -33,6 +33,12 @@ export const HOVER_BOB_UNITS = 0.03 * PIGEON_HEIGHT_UNITS;
 export const HOVER_BOB_HZ = 1.6;
 
 export const REVEAL_LID_STAGGER_S = 0.12;
+export const WHISTLE_S = 0.4;
+export const RESULTS_HOLD_S = 4;
+export const REVEAL_READ_S = 1.6;
+export const ROLE_SHEET_S = 1.0;
+
+export const revealSheetDelayS = (boxCount: number): number => WHISTLE_S + (boxCount - 1) * REVEAL_LID_STAGGER_S + REVEAL_READ_S;
 
 export const TIMER_WEDGE_S = 10;
 export const TIMER_KICK_RAD = (2 * Math.PI) / 180;

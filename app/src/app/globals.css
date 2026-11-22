@@ -1,12 +1,43 @@
+:root {
+  --font-title: "Gambarino";
+  --font-body: "Sentient";
+  --ink: #3b2a22;
+  --ink-line: rgb(59 42 34 / 0.7);
+  --ink-text: rgb(59 42 34 / 0.86);
+  --ink-faint: rgb(59 42 34 / 0.35);
+  --page: #ebddbf;
+  --page-core: #f2e6cb;
+  --accent: #a8331f;
+  --accent-text: #f2e6cb;
+  --edge: #d3bf98;
+  --contact: rgb(59 42 34 / 0.45);
+  --cast: rgb(59 42 34 / 0.22);
+  --leading-shadow: 18 10 5;
+  --lawn: #b4c08f;
+  --sheet-in: 0.35s;
+  --sheet-out: 0.28s;
+  --sheet-ease-in: cubic-bezier(0.16, 1, 0.3, 1);
+  --sheet-ease-out: cubic-bezier(0.4, 0, 1, 1);
+}
+
 html,
 body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #b4c08f;
+  background: var(--lawn);
+  color: var(--ink);
+  font-family: var(--font-body), Georgia, "Times New Roman", serif;
 }
 
 canvas {
   display: block;
   touch-action: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sheet-in: 0s;
+    --sheet-out: 0s;
+  }
 }

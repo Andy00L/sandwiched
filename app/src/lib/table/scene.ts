@@ -39,7 +39,8 @@ import { createBrowserKeyStore } from "../chain/key-store";
 import type { Result } from "../chain/result";
 import { type LivePlay, openLivePlay, openLiveRoundSource, parseTableAddress } from "../game/live-table";
 import { openPracticePlay } from "../game/practice-table";
-import type { TablePlayer } from "../game/table-player";
+import type { ClickTarget } from "../game/click-intent";
+import { DEFAULT_BUY_IN_CHIPS } from "../game/guest-chain";
 import { createReplaySource, type RoundSource } from "../game/round-source";
 import { GROUND_INKS } from "./palette";
 import { placeOnTable } from "./layout";
@@ -56,7 +57,8 @@ import type { WhaleFace } from "./pieces/whale-face";
 import { BOX_ROW_DECK_Z, BOX_SPACING_UNITS, boxAlong } from "./replay/perches";
 import { loadRecordedRound } from "./replay/recorded-rounds";
 import { buildReplayScene, REPLAY_LEAD_S } from "./replay/replay-scene";
-import { listenForBoxClicks } from "./stage/box-picking";
+import { listenForTableClicks } from "./stage/box-picking";
+import { type SignpostLook, buildSignpost } from "./pieces/signpost";
 import { recordFrameTimes } from "./stage/frame-recorder";
 import { buildParkLife } from "./stage/park-life";
 import { printParkGround } from "./stage/park-ground";
@@ -65,9 +67,14 @@ import { probeQualityTier, storedQuality } from "./stage/quality-probe";
 import { PAPER_STOCK, PARK_LENS, PARK_LIGHT, PARK_TEST_VIEW, PARK_VIEW, SCENE_FOCUS, TABLE_YAW_RAD, TEST_CARD_SPOT } from "./stage/look";
 
 const LIVE_TABLE_TIMEOUT_MS = 20_000;
+const ignoreClick = (): void => undefined;
 const PLAY_WAIT_MS = 600_000;
 
-type SceneMode = { kind: "sample" } | { kind: "rounds"; source: RoundSource; player: TablePlayer | null };
+type SceneMode = { kind: "sample" } | { kind: "rounds"; source: RoundSource; onClick: ((target: ClickTarget) => void) | null };
+
+export type SignpostPlacement = { x: number; z: number; look: SignpostLook; canPick: () => boolean; onPick: () => void };
+
+export type GameScenePorts = { source: RoundSource; onClick: (target: ClickTarget) => void; signposts: readonly SignpostPlacement[] };
 
 function buildTestCards(harness: Harness): void {
   const [outline, paint] = sittingPigeonCard();
@@ -173,7 +180,7 @@ function reportGuestStage(stage: GuestStage): void {
 }
 
 function readPlayMode(play: Result<LivePlay>): SceneMode {
-  if (play.ok) return { kind: "rounds", source: play.value.source, player: play.value.player };
+  if (play.ok) return { kind: "rounds", source: play.value.source, onClick: play.value.player.click };
   console.warn(`[readPlayMode] ${play.reason}`);
   return { kind: "sample" };
 }
@@ -181,31 +188,38 @@ function readPlayMode(play: Result<LivePlay>): SceneMode {
 async function readSceneMode(): Promise<SceneMode> {
   const params = new URLSearchParams(location.search);
   const tableAddress = params.get("table");
-  if (params.has("practice")) return readPlayMode(await openPracticePlay(PLAY_WAIT_MS, reportGuestStage));
+  if (params.has("practice")) return readPlayMode(await openPracticePlay(PLAY_WAIT_MS, "everyRound", reportGuestStage));
   if (tableAddress && params.has("play")) {
     const table = parseTableAddress(tableAddress);
     if (!table.ok) return readPlayMode(table);
     const keyStore = createBrowserKeyStore();
     const guestKey = loadGuestKey(keyStore).keypair;
-    return readPlayMode(await openLivePlay({ table: table.value, keyStore, guestKey, timeoutMs: PLAY_WAIT_MS, onStage: reportGuestStage, startCompanions: null }));
+    return readPlayMode(await openLivePlay({ table: table.value, keyStore, guestKey, timeoutMs: PLAY_WAIT_MS, buyInChips: DEFAULT_BUY_IN_CHIPS, antePolicy: "everyRound", onStage: reportGuestStage, startCompanions: null }));
   }
   if (tableAddress) {
     const live = await openLiveRoundSource(tableAddress, LIVE_TABLE_TIMEOUT_MS);
-    if (live.ok) return { kind: "rounds", source: live.value, player: null };
+    if (live.ok) return { kind: "rounds", source: live.value, onClick: null };
     console.warn(`[readSceneMode] ${live.reason}`);
     return { kind: "sample" };
   }
   const replayName = params.get("replay");
   if (!replayName) return { kind: "sample" };
   const loaded = await loadRecordedRound(replayName);
-  if (loaded.ok) return { kind: "rounds", source: createReplaySource(loaded.round, REPLAY_LEAD_S), player: null };
+  if (loaded.ok) return { kind: "rounds", source: createReplaySource(loaded.round, REPLAY_LEAD_S), onClick: null };
   console.warn(`[readSceneMode] ${loaded.reason}`);
   return { kind: "sample" };
 }
 
-export async function buildTableScene(): Promise<void> {
-  const mode = await readSceneMode();
-  const player = mode.kind === "rounds" ? mode.player : null;
+export async function buildStageScene(): Promise<void> {
+  buildScene(await readSceneMode(), []);
+}
+
+export function buildGameScene(ports: GameScenePorts): void {
+  buildScene({ kind: "rounds", source: ports.source, onClick: ports.onClick }, ports.signposts);
+}
+
+function buildScene(mode: SceneMode, signposts: readonly SignpostPlacement[]): void {
+  const onClick = mode.kind === "rounds" ? mode.onClick : null;
   const quality = storedQuality();
   const harness = createHarness({
     ground: GROUND_INKS.lawn,
@@ -216,13 +230,18 @@ export async function buildTableScene(): Promise<void> {
     lens: { ...PARK_LENS, taps: quality.dofTaps, msaa: quality.msaa },
     focus: SCENE_FOCUS,
     renderScale: quality.renderScale,
-    foldOnClick: player === null,
+    foldOnClick: onClick === null && signposts.length === 0,
   });
   harness.printGround((tools) => printParkGround(tools, harness.bounds));
   if (harness.flags.TEST) buildTestCards(harness);
   else {
     const boxes = buildPark(harness, mode);
-    if (player !== null) listenForBoxClicks(harness, boxes, player.click);
+    const pickable = signposts.map((placement) => ({
+      node: buildSignpost(harness, placement.x, placement.z, placement.look).group,
+      canPick: placement.canPick,
+      onPick: placement.onPick,
+    }));
+    if (onClick !== null || pickable.length > 0) listenForTableClicks(harness, { boxes, signposts: pickable, onClick: onClick ?? ignoreClick });
   }
   trimHiddenBacksOnceRisen(harness);
   harness.start();

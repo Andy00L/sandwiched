@@ -6,7 +6,7 @@ import type { RoundSource } from "../../game/round-source";
 import type { HandRaisedEvent, RecordedRound } from "../../game/round-events";
 import { viewStateAt } from "../../game/view-state";
 import type { RoundViewState } from "../../game/view-state";
-import { REVEAL_LID_STAGGER_S } from "../motion/motion-tokens";
+import { RESULTS_HOLD_S, REVEAL_LID_STAGGER_S, WHISTLE_S } from "../motion/motion-tokens";
 import {
   boxHopRad,
   cameraDropUnits,
@@ -48,8 +48,6 @@ import type { HandPath } from "./slam";
 import { createMoodGovernor, crowdedGlance, glanceTowardBox } from "./whale-mood";
 
 export const REPLAY_LEAD_S = 2.5;
-const WHISTLE_S = 0.4;
-const RESULTS_HOLD_S = 4;
 const CRUMB_BITS_PER_BOX = 16;
 const CRUMB_BITS_COUNTED_ONE_BY_ONE = 12;
 const CRUMBS_PER_LATER_BIT = 5;

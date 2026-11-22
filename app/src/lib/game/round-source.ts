@@ -87,3 +87,22 @@ export function waitForLiveRoundSource(store: TableStore, timeoutMs: number): Pr
     resolveOnFirstRound();
   });
 }
+
+export type SwitchableSource = { source: RoundSource; switchTo: (next: RoundSource) => void };
+
+export function createSwitchableSource(initial: RoundSource, players: readonly RoundPlayer[]): SwitchableSource {
+  let current = initial;
+  return {
+    source: {
+      players,
+      boxCount: initial.boxCount,
+      tickMs: initial.tickMs,
+      timing: initial.timing,
+      latestRound: () => current.latestRound(),
+      tickAt: (timeSeconds) => current.tickAt(timeSeconds),
+    },
+    switchTo: (next) => {
+      current = next;
+    },
+  };
+}

@@ -14,7 +14,7 @@ import { type ActionSigner, createGuestPlayChain } from "./guest-chain";
 import type { GuestStage } from "./guest-steps";
 import type { RecordedRound } from "./round-events";
 import { type RoundSource, waitForLiveRoundSource } from "./round-source";
-import { type TablePlayer, startTablePlayer } from "./table-player";
+import { type AntePolicy, type TablePlayer, startTablePlayer } from "./table-player";
 import { type LiveRound, type TableStore, createTableStore } from "./table-store";
 
 const ADVANCE_INTERVAL_MS = 20;
@@ -114,7 +114,9 @@ export type GuestSeatSetup = {
   wallet: Keypair;
   feed: AccountFeed;
   signsWith: ActionSigner;
+  buyInChips: bigint;
   isCranking: boolean;
+  antePolicy: AntePolicy;
   onStage: (stage: GuestStage) => void;
 };
 
@@ -131,7 +133,7 @@ export async function seatGuest(setup: GuestSeatSetup): Promise<Result<GuestSeat
   const store = createTableStore({ ownWallet: wallet.publicKey });
   let latestTable: TableSnapshot = tableSnapshot.value;
   const stopFeed = connectTableStore(store, { feed, program, table }, (snapshot) => (latestTable = snapshot));
-  const play = createGuestPlayChain({ client, wallet, table, tableSnapshot: tableSnapshot.value, keyStore: setup.keyStore, signsWith: setup.signsWith });
+  const play = createGuestPlayChain({ client, wallet, table, tableSnapshot: tableSnapshot.value, keyStore: setup.keyStore, signsWith: setup.signsWith, buyInChips: setup.buyInChips });
   const player = startTablePlayer({
     store,
     actions: play.actions,
@@ -142,6 +144,7 @@ export async function seatGuest(setup: GuestSeatSetup): Promise<Result<GuestSeat
     readTable: () => latestTable,
     onStage: setup.onStage,
     isCranking: setup.isCranking,
+    antePolicy: setup.antePolicy,
   });
   const close = () => {
     player.stop();
@@ -150,7 +153,7 @@ export async function seatGuest(setup: GuestSeatSetup): Promise<Result<GuestSeat
   return success({ store, player, guest: wallet.publicKey, client, tableSnapshot: tableSnapshot.value, close });
 }
 
-export type LivePlay = { source: RoundSource; player: TablePlayer; guest: PublicKey; close: () => void };
+export type LivePlay = { source: RoundSource; store: TableStore; player: TablePlayer; guest: PublicKey; tableSnapshot: TableSnapshot; close: () => void };
 
 export type CompanionSeat = { table: PublicKey; feed: AccountFeed; keyStore: KeyStore; guest: PublicKey };
 
@@ -159,6 +162,8 @@ export type LivePlaySetup = {
   keyStore: KeyStore;
   guestKey: Keypair;
   timeoutMs: number;
+  buyInChips: bigint;
+  antePolicy: AntePolicy;
   onStage: (stage: GuestStage) => void;
   startCompanions: ((seat: CompanionSeat) => () => void) | null;
 };
@@ -174,7 +179,9 @@ export async function openLivePlay(setup: LivePlaySetup): Promise<Result<LivePla
     wallet: setup.guestKey,
     feed,
     signsWith: "session",
+    buyInChips: setup.buyInChips,
     isCranking: true,
+    antePolicy: setup.antePolicy,
     onStage: setup.onStage,
   });
   if (!seated.ok) {
@@ -189,7 +196,7 @@ export async function openLivePlay(setup: LivePlaySetup): Promise<Result<LivePla
   };
   reportSettledRounds(seated.value.store);
   const source = await waitForLiveRoundSource(seated.value.store, setup.timeoutMs);
-  if (source.ok) return success({ source: source.value, player: seated.value.player, guest: seated.value.guest, close });
+  if (source.ok) return success({ source: source.value, store: seated.value.store, player: seated.value.player, guest: seated.value.guest, tableSnapshot: seated.value.tableSnapshot, close });
   close();
   return source;
 }

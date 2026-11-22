@@ -36,9 +36,17 @@ export type TablePlayerPorts = {
   readTable: () => TableSnapshot | null;
   onStage: (stage: GuestStage) => void;
   isCranking: boolean;
+  antePolicy: AntePolicy;
 };
 
-export type TablePlayer = { click: (target: ClickTarget) => void; perform: (intent: PlayerIntent) => void; stop: () => void };
+export type AntePolicy = "everyRound" | "whenAsked";
+
+export type TablePlayer = {
+  click: (target: ClickTarget) => void;
+  perform: (intent: PlayerIntent) => void;
+  anteNextRound: () => void;
+  stop: () => void;
+};
 
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
@@ -76,6 +84,7 @@ export function startTablePlayer(ports: TablePlayerPorts): TablePlayer {
   const crankSentAtMs = new Map<string, number>();
   let stage: GuestStage = { kind: "preparing", step: "sit", attempt: 0 };
   let antedRound: bigint | null = null;
+  let isAnteWanted = ports.antePolicy === "everyRound";
   let roundsSatOut = NO_ROUNDS_SAT_OUT;
   let lastPrepareStartMs = Number.NEGATIVE_INFINITY;
   let isStopped = false;
@@ -86,13 +95,21 @@ export function startTablePlayer(ports: TablePlayerPorts): TablePlayer {
   };
 
   const anteWhenDue = async (table: TableSnapshot) => {
-    if (table.phase.state !== "lobby" || antedRound === table.roundNumber) return;
+    if (!isAnteWanted || table.phase.state !== "lobby" || antedRound === table.roundNumber) return;
     const seatIndex = findOwnSeatIndex(table, ports.wallet);
-    if (seatIndex === null || table.antedSeatIndexes.includes(seatIndex)) return;
+    if (seatIndex === null) return;
+    if (table.antedSeatIndexes.includes(seatIndex)) {
+      isAnteWanted = ports.antePolicy === "everyRound";
+      return;
+    }
     antedRound = table.roundNumber;
     const ack = await actions.ante();
     report("ante", ack);
-    if (!ack.ok) setTimeout(() => (antedRound = null), CRANK_RETRY_MS);
+    if (!ack.ok) {
+      setTimeout(() => (antedRound = null), CRANK_RETRY_MS);
+      return;
+    }
+    isAnteWanted = ports.antePolicy === "everyRound";
   };
 
   const crankWhenDue = async (table: TableSnapshot) => {
@@ -162,6 +179,9 @@ export function startTablePlayer(ports: TablePlayerPorts): TablePlayer {
   return {
     click,
     perform,
+    anteNextRound: () => {
+      isAnteWanted = true;
+    },
     stop: () => {
       isStopped = true;
       clearInterval(decideTimer);

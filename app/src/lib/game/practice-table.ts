@@ -8,9 +8,11 @@ import { type Result, attempt, failure, success } from "../chain/result";
 import { rng } from "../papercraft/lib/paperkit-2d.js";
 import { startBotBrain } from "./bot-player";
 import { LIVE_TIMING } from "./chain-rules";
+import { DEFAULT_BUY_IN_CHIPS } from "./guest-chain";
 import type { GuestStage } from "./guest-steps";
 import { type CompanionSeat, type GuestSeat, type LivePlay, openLivePlay, seatGuest } from "./live-table";
 import type { Temperament } from "./round-events";
+import type { AntePolicy } from "./table-player";
 import { PRACTICE_TABLES, type TableListing } from "./table-listings";
 
 export const PRACTICE_BOT_COUNT = 6;
@@ -31,8 +33,12 @@ export async function derivePracticeBotKeys(table: PublicKey): Promise<Result<Ke
 
 const isBotWallet = (wallet: PublicKey, bots: readonly PublicKey[]) => bots.some((bot) => bot.equals(wallet));
 
-export function chooseBotDriver(seats: readonly (PublicKey | null)[], bots: readonly PublicKey[]): PublicKey | null {
-  return seats.find((wallet): wallet is PublicKey => wallet !== null && !isBotWallet(wallet, bots)) ?? null;
+export type DriverView = { seats: readonly (PublicKey | null)[]; antedSeatIndexes: readonly number[] };
+
+export function chooseBotDriver(table: DriverView, bots: readonly PublicKey[], self: PublicKey): PublicKey | null {
+  const isCandidate = (wallet: PublicKey, seatIndex: number) =>
+    !isBotWallet(wallet, bots) && (wallet.equals(self) || table.antedSeatIndexes.includes(seatIndex));
+  return table.seats.find((wallet, seatIndex): wallet is PublicKey => wallet !== null && isCandidate(wallet, seatIndex)) ?? null;
 }
 
 export type PracticeCandidate = { listing: TableListing; table: TableSnapshot | null; bots: readonly PublicKey[] };
@@ -90,7 +96,9 @@ async function startBot(setup: PracticeBotsSetup, bot: Keypair, botIndex: number
     wallet: bot,
     feed: setup.feed,
     signsWith: "wallet",
+    buyInChips: DEFAULT_BUY_IN_CHIPS,
     isCranking: false,
+    antePolicy: "everyRound",
     onStage: reportBotStage(botIndex),
   });
   if (!seated.ok) {
@@ -119,7 +127,7 @@ export function drivePracticeBots(setup: PracticeBotsSetup): () => void {
   };
 
   const steer = (table: TableSnapshot) => {
-    const isWanted = chooseBotDriver(table.seats, botWallets)?.equals(setup.driver) === true;
+    const isWanted = chooseBotDriver(table, botWallets, setup.driver)?.equals(setup.driver) === true;
     switch (crew.kind) {
       case "parked":
         if (!isWanted) return;
@@ -152,7 +160,7 @@ export function drivePracticeBots(setup: PracticeBotsSetup): () => void {
 
 const PRACTICE_BOT_SEED = 1;
 
-export async function openPracticePlay(timeoutMs: number, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> {
+export async function openPracticePlay(timeoutMs: number, antePolicy: AntePolicy, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> {
   const keyStore = createBrowserKeyStore();
   const guestKey = loadGuestKey(keyStore).keypair;
   const listing = await findPracticeTable(guestKey.publicKey);
@@ -161,5 +169,5 @@ export async function openPracticePlay(timeoutMs: number, onStage: (stage: Guest
   if (!bots.ok) return failure(`[openPracticePlay] ${bots.reason}`);
   const startCompanions = (seat: CompanionSeat) =>
     drivePracticeBots({ table: seat.table, feed: seat.feed, keyStore: seat.keyStore, bots: bots.value, driver: seat.guest, seed: PRACTICE_BOT_SEED });
-  return openLivePlay({ table: listing.value.address, keyStore, guestKey, timeoutMs, onStage, startCompanions });
+  return openLivePlay({ table: listing.value.address, keyStore, guestKey, timeoutMs, buyInChips: DEFAULT_BUY_IN_CHIPS, antePolicy, onStage, startCompanions });
 }

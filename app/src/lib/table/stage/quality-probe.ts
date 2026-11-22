@@ -3,6 +3,10 @@ import { recordFrameTimes } from "./frame-recorder";
 
 type QualityTier = "high" | "medium" | "low";
 
+export type QualityChoice = QualityTier | "auto";
+
+export const QUALITY_CHOICES: readonly QualityChoice[] = ["high", "medium", "low", "auto"];
+
 export interface QualitySettings {
   renderScale: number;
   shadowMapSize: number;
@@ -42,6 +46,22 @@ function storeTier(tier: QualityTier): void {
     localStorage.setItem(QUALITY_STORAGE_KEY, tier);
   } catch {
     console.info(`[storeTier] storage unavailable, the ${tier} tier lasts for this visit`);
+  }
+}
+
+export function readQualityChoice(): QualityChoice {
+  return readStoredTier() ?? "auto";
+}
+
+export function storeQualityChoice(choice: QualityChoice): void {
+  if (choice !== "auto") {
+    storeTier(choice);
+    return;
+  }
+  try {
+    localStorage.removeItem(QUALITY_STORAGE_KEY);
+  } catch {
+    console.info("[storeQualityChoice] storage unavailable, the tier is measured again on the next load anyway");
   }
 }
 

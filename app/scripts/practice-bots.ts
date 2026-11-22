@@ -5,6 +5,7 @@ import { type AccountFeed, createAccountFeed } from "../src/lib/chain/account-fe
 import { ROLLUP_RPC_URL, ROLLUP_WS_URL, SPONSOR_ROUTE_PATH } from "../src/lib/chain/config";
 import { loadGuestKey } from "../src/lib/chain/guest-key";
 import { startBotBrain } from "../src/lib/game/bot-player";
+import { DEFAULT_BUY_IN_CHIPS } from "../src/lib/game/guest-chain";
 import { LIVE_TIMING } from "../src/lib/game/chain-rules";
 import { type GuestSeat, parseTableAddress, reportSettledRounds, seatGuest } from "../src/lib/game/live-table";
 import type { Temperament } from "../src/lib/game/round-events";
@@ -41,7 +42,9 @@ async function startBot(botIndex: number, tableAddressText: string, routeUrl: st
     wallet: loadGuestKey(keyStore).keypair,
     feed,
     signsWith: "session",
+    buyInChips: DEFAULT_BUY_IN_CHIPS,
     isCranking: true,
+    antePolicy: "everyRound",
     onStage: (stage) => log(`bot ${botIndex} (${temperament}) ${JSON.stringify(stage)}`),
   });
   if (!seated.ok) {

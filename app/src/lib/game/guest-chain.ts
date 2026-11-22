@@ -14,6 +14,7 @@ import type { GuestChain, GuestFacts, GuestNeeds, GuestStep } from "./guest-step
 import type { PlayerActions } from "./table-player";
 
 export const BUY_IN_ANTES = 10n;
+export const DEFAULT_BUY_IN_CHIPS = BUY_IN_ANTES * BigInt(CHIPS_PER_ANTE);
 
 export type ActionSigner = "session" | "wallet";
 
@@ -24,6 +25,7 @@ export type GuestChainSetup = {
   tableSnapshot: TableSnapshot;
   keyStore: KeyStore;
   signsWith: ActionSigner;
+  buyInChips: bigint;
 };
 
 export type GuestPlayChain = { guest: GuestChain; actions: PlayerActions; needs: GuestNeeds };
@@ -31,14 +33,14 @@ export type GuestPlayChain = { guest: GuestChain; actions: PlayerActions; needs:
 const fromAck = (label: string, ack: RollupAck): Result<string> =>
   ack.ok ? success(ack.signature) : failure(`[${label}] ${ack.errorName} ${ack.detail}`);
 
-export function createGuestPlayChain({ client, wallet, table, tableSnapshot, keyStore, signsWith }: GuestChainSetup): GuestPlayChain {
+export function createGuestPlayChain({ client, wallet, table, tableSnapshot, keyStore, signsWith, buyInChips }: GuestChainSetup): GuestPlayChain {
   const mint = tableSnapshot.mint;
   const seatAddress = findSeatAddress(table, wallet.publicKey);
   const walletToken = findWalletTokenAddress(wallet.publicKey, mint);
   const sessions = signsWith === "session" ? createSessionKeeper(client, wallet, keyStore) : null;
   const seatActions = createSeatActions({ client, table, mint, wallet, sessions });
   const deposits = createDepositQueue({ chain: createDepositChain({ client, owner: wallet, mint, validator: tableSnapshot.validator }), owner: wallet.publicKey, store: keyStore });
-  const chipsPerBuyIn = BUY_IN_ANTES * BigInt(CHIPS_PER_ANTE);
+  const chipsPerBuyIn = buyInChips;
   const needs: GuestNeeds = { chipsToPlay: BigInt(CHIPS_PER_ANTE), unitsPerBuyIn: chipsPerBuyIn * tableSnapshot.chipUnits };
   let hasSession = sessions === null;
 
