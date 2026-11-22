@@ -71,6 +71,7 @@ describe("startTablePlayer", () => {
       timing: LIVE_TIMING,
       readTable: () => table,
       onStage: () => undefined,
+      isCranking: true,
     });
     await advanceFakeTime(2_000, 50);
     expect(calls.filter((call) => call === "ante")).toHaveLength(1);
@@ -93,11 +94,32 @@ describe("startTablePlayer", () => {
       timing: LIVE_TIMING,
       readTable: () => table,
       onStage: () => undefined,
+      isCranking: true,
     });
     await advanceFakeTime(2_000, 50);
     expect(calls.filter((call) => call.startsWith("settle"))).toEqual(["settle:3"]);
     await advanceFakeTime(2_000, 50);
     expect(calls.filter((call) => call.startsWith("settle"))).toHaveLength(2);
+    player.stop();
+  });
+
+  test("a player that leaves cranks to others sends none, even when one is due", async () => {
+    const { actions, calls } = createRecordingActions();
+    const round = buildRoundSnapshot({ endTick: 100n, swats: [] });
+    const table = buildTableSnapshot({ seats, antedSeatIndexes: [0, 1, 2], phase: { state: "live", whaleSeat: 0 }, round });
+    const player = startTablePlayer({
+      store: createStubStore(200),
+      actions,
+      guest: readyGuest,
+      needs: { chipsToPlay: 100n, unitsPerBuyIn: 1n },
+      wallet: OWN_WALLET,
+      timing: LIVE_TIMING,
+      readTable: () => table,
+      onStage: () => undefined,
+      isCranking: false,
+    });
+    await advanceFakeTime(2_000, 50);
+    expect(calls).toEqual([]);
     player.stop();
   });
 });

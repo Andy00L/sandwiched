@@ -15,23 +15,32 @@ import type { PlayerActions } from "./table-player";
 
 export const BUY_IN_ANTES = 10n;
 
-export type GuestChainSetup = { client: ChainClient; wallet: TransactionSigner; table: PublicKey; tableSnapshot: TableSnapshot; keyStore: KeyStore };
+export type ActionSigner = "session" | "wallet";
+
+export type GuestChainSetup = {
+  client: ChainClient;
+  wallet: TransactionSigner;
+  table: PublicKey;
+  tableSnapshot: TableSnapshot;
+  keyStore: KeyStore;
+  signsWith: ActionSigner;
+};
 
 export type GuestPlayChain = { guest: GuestChain; actions: PlayerActions; needs: GuestNeeds };
 
 const fromAck = (label: string, ack: RollupAck): Result<string> =>
   ack.ok ? success(ack.signature) : failure(`[${label}] ${ack.errorName} ${ack.detail}`);
 
-export function createGuestPlayChain({ client, wallet, table, tableSnapshot, keyStore }: GuestChainSetup): GuestPlayChain {
+export function createGuestPlayChain({ client, wallet, table, tableSnapshot, keyStore, signsWith }: GuestChainSetup): GuestPlayChain {
   const mint = tableSnapshot.mint;
   const seatAddress = findSeatAddress(table, wallet.publicKey);
   const walletToken = findWalletTokenAddress(wallet.publicKey, mint);
-  const sessions = createSessionKeeper(client, wallet, keyStore);
+  const sessions = signsWith === "session" ? createSessionKeeper(client, wallet, keyStore) : null;
   const seatActions = createSeatActions({ client, table, mint, wallet, sessions });
   const deposits = createDepositQueue({ chain: createDepositChain({ client, owner: wallet, mint, validator: tableSnapshot.validator }), owner: wallet.publicKey, store: keyStore });
   const chipsPerBuyIn = BUY_IN_ANTES * BigInt(CHIPS_PER_ANTE);
   const needs: GuestNeeds = { chipsToPlay: BigInt(CHIPS_PER_ANTE), unitsPerBuyIn: chipsPerBuyIn * tableSnapshot.chipUnits };
-  let hasSession = false;
+  let hasSession = sessions === null;
 
   const readFacts = async (): Promise<Result<GuestFacts>> => {
     const [seatDelegated, tokenDelegated, seat, walletUnits] = await Promise.all([
@@ -62,6 +71,7 @@ export function createGuestPlayChain({ client, wallet, table, tableSnapshot, key
         return seated.ok ? success(seated.value.signature) : seated;
       }
       case "session": {
+        if (sessions === null) return failure("[createGuestPlayChain] a wallet-signed player opens no session");
         const opened = await sessions.resolve();
         if (!opened.ok) return opened;
         hasSession = true;

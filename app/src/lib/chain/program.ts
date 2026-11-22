@@ -37,7 +37,7 @@ export type SeatActor = { signer: PublicKey; wallet: PublicKey; table: PublicKey
 
 const toBN = (value: bigint): BN => new BN(value.toString());
 
-const findDelegationAccounts = (delegated: PublicKey) => ({
+export const findDelegationAccounts = (delegated: PublicKey) => ({
   buffer: delegateBufferPdaFromDelegatedAccountAndOwnerProgram(delegated, SANDWICH_PROGRAM_ID),
   record: delegationRecordPdaFromDelegatedAccount(delegated),
   metadata: delegationMetadataPdaFromDelegatedAccount(delegated),

@@ -35,6 +35,7 @@ export type TablePlayerPorts = {
   timing: RoundTiming;
   readTable: () => TableSnapshot | null;
   onStage: (stage: GuestStage) => void;
+  isCranking: boolean;
 };
 
 export type TablePlayer = { click: (target: ClickTarget) => void; perform: (intent: PlayerIntent) => void; stop: () => void };
@@ -135,7 +136,7 @@ export function startTablePlayer(ports: TablePlayerPorts): TablePlayer {
     if (rejoinWhenEvicted(table)) return;
     isDeciding = true;
     await anteWhenDue(table);
-    await crankWhenDue(table);
+    if (ports.isCranking) await crankWhenDue(table);
     isDeciding = false;
   };
 

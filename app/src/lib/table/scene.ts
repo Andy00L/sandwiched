@@ -34,7 +34,11 @@ import { createHarness } from "papercraft/harness.js";
 import type { Harness } from "papercraft/harness.js";
 import type { Object3D } from "three";
 import type { GuestStage } from "../game/guest-steps";
-import { openLivePlay, openLiveRoundSource } from "../game/live-table";
+import { loadGuestKey } from "../chain/guest-key";
+import { createBrowserKeyStore } from "../chain/key-store";
+import type { Result } from "../chain/result";
+import { type LivePlay, openLivePlay, openLiveRoundSource, parseTableAddress } from "../game/live-table";
+import { openPracticePlay } from "../game/practice-table";
 import type { TablePlayer } from "../game/table-player";
 import { createReplaySource, type RoundSource } from "../game/round-source";
 import { GROUND_INKS } from "./palette";
@@ -168,14 +172,22 @@ function reportGuestStage(stage: GuestStage): void {
   console.info(`[reportGuestStage] ${JSON.stringify(stage)}`);
 }
 
+function readPlayMode(play: Result<LivePlay>): SceneMode {
+  if (play.ok) return { kind: "rounds", source: play.value.source, player: play.value.player };
+  console.warn(`[readPlayMode] ${play.reason}`);
+  return { kind: "sample" };
+}
+
 async function readSceneMode(): Promise<SceneMode> {
   const params = new URLSearchParams(location.search);
   const tableAddress = params.get("table");
+  if (params.has("practice")) return readPlayMode(await openPracticePlay(PLAY_WAIT_MS, reportGuestStage));
   if (tableAddress && params.has("play")) {
-    const play = await openLivePlay(tableAddress, PLAY_WAIT_MS, reportGuestStage);
-    if (play.ok) return { kind: "rounds", source: play.value.source, player: play.value.player };
-    console.warn(`[readSceneMode] ${play.reason}`);
-    return { kind: "sample" };
+    const table = parseTableAddress(tableAddress);
+    if (!table.ok) return readPlayMode(table);
+    const keyStore = createBrowserKeyStore();
+    const guestKey = loadGuestKey(keyStore).keypair;
+    return readPlayMode(await openLivePlay({ table: table.value, keyStore, guestKey, timeoutMs: PLAY_WAIT_MS, onStage: reportGuestStage, startCompanions: null }));
   }
   if (tableAddress) {
     const live = await openLiveRoundSource(tableAddress, LIVE_TABLE_TIMEOUT_MS);

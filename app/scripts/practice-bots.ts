@@ -1,7 +1,9 @@
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createSponsoredFeePayment } from "../src/lib/chain/client";
-import { SPONSOR_ROUTE_PATH } from "../src/lib/chain/config";
+import { type AccountFeed, createAccountFeed } from "../src/lib/chain/account-feed";
+import { ROLLUP_RPC_URL, ROLLUP_WS_URL, SPONSOR_ROUTE_PATH } from "../src/lib/chain/config";
+import { loadGuestKey } from "../src/lib/chain/guest-key";
 import { startBotBrain } from "../src/lib/game/bot-player";
 import { LIVE_TIMING } from "../src/lib/game/chain-rules";
 import { type GuestSeat, parseTableAddress, reportSettledRounds, seatGuest } from "../src/lib/game/live-table";
@@ -19,7 +21,7 @@ const log = (message: string): void => console.log(`[practiceBots] ${message}`);
 
 type RunningBot = { seat: GuestSeat; stopBrain: () => void };
 
-async function startBot(botIndex: number, tableAddressText: string, routeUrl: string, seed: number): Promise<RunningBot | null> {
+async function startBot(botIndex: number, tableAddressText: string, routeUrl: string, seed: number, feed: AccountFeed): Promise<RunningBot | null> {
   const table = parseTableAddress(tableAddressText);
   if (!table.ok) {
     log(table.reason);
@@ -36,6 +38,10 @@ async function startBot(botIndex: number, tableAddressText: string, routeUrl: st
     table: table.value,
     feePayment: feePayment.value,
     keyStore,
+    wallet: loadGuestKey(keyStore).keypair,
+    feed,
+    signsWith: "session",
+    isCranking: true,
     onStage: (stage) => log(`bot ${botIndex} (${temperament}) ${JSON.stringify(stage)}`),
   });
   if (!seated.ok) {
@@ -55,8 +61,9 @@ if (tableAddressText === undefined) {
 mkdirSync(BOT_KEY_FOLDER, { recursive: true, mode: 0o700 });
 const botCount = Number(botCountText ?? DEFAULT_BOT_COUNT);
 const seed = Number(seedText ?? DEFAULT_SEED);
+const feed = createAccountFeed({ rpcUrl: ROLLUP_RPC_URL, wsUrl: ROLLUP_WS_URL });
 const bots = (
-  await Promise.all(Array.from({ length: botCount }, (_unused, botIndex) => startBot(botIndex, tableAddressText, routeUrlText ?? DEFAULT_ROUTE_URL, seed)))
+  await Promise.all(Array.from({ length: botCount }, (_unused, botIndex) => startBot(botIndex, tableAddressText, routeUrlText ?? DEFAULT_ROUTE_URL, seed, feed)))
 ).filter((bot): bot is RunningBot => bot !== null);
 const [firstBot] = bots;
 if (firstBot === undefined) process.exit(1);
@@ -66,5 +73,6 @@ process.on("SIGINT", () => {
     bot.stopBrain();
     bot.seat.close();
   }
+  feed.close();
   process.exit(0);
 });
