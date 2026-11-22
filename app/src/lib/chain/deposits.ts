@@ -47,7 +47,7 @@ export type RecoveryOutcome = { shuttleId: number; state: "merged" | "landed" | 
 
 export type ShuttleSighting = "absent" | "funded" | "emptied";
 
-export type BaseShuttle = { kind: "missing" } | { kind: "delegated" } | { kind: "undelegated" } | { kind: "foreign"; owner: string };
+export type BaseShuttle = { kind: "missing"; slot: number } | { kind: "delegated" } | { kind: "undelegated" } | { kind: "foreign"; owner: string };
 
 export type DepositChain = {
   readShuttle: (shuttleId: number) => Promise<Result<ShuttleSighting>>;
@@ -84,12 +84,13 @@ export const createDepositChain = ({ client, owner, mint, validator }: DepositCh
       return success(units.value > 0n ? "funded" : "emptied");
     },
     readBaseShuttle: async (shuttleId) => {
-      const record = await attempt(() => client.base.getAccountInfo(deriveShuttle(shuttleId).record, "confirmed"));
-      if (!record.ok) return record;
-      if (record.value === null) return success({ kind: "missing" });
-      if (record.value.owner.equals(DELEGATION_PROGRAM_ID)) return success({ kind: "delegated" });
-      if (record.value.owner.equals(EPHEMERAL_SPL_TOKEN_PROGRAM_ID)) return success({ kind: "undelegated" });
-      return success({ kind: "foreign", owner: record.value.owner.toBase58() });
+      const read = await attempt(() => client.base.getAccountInfoAndContext(deriveShuttle(shuttleId).record, "confirmed"));
+      if (!read.ok) return read;
+      const record = read.value.value;
+      if (record === null) return success({ kind: "missing", slot: read.value.context.slot });
+      if (record.owner.equals(DELEGATION_PROGRAM_ID)) return success({ kind: "delegated" });
+      if (record.owner.equals(EPHEMERAL_SPL_TOKEN_PROGRAM_ID)) return success({ kind: "undelegated" });
+      return success({ kind: "foreign", owner: record.owner.toBase58() });
     },
     submitDeposit: async (units, shuttleId) => {
       const instructions = await attempt(() => delegateSpl(owner.publicKey, mint, units, { validator, payer: feePayer, shuttleId }));
@@ -185,8 +186,8 @@ export const createDepositQueue = ({ chain, owner, store, readNowMs = Date.now }
     return run;
   };
 
-  const waitForLanding = (shuttleId: number, hasConfirmedOnBase: boolean) => {
-    let hasSeenInFlight = hasConfirmedOnBase;
+  const waitForLanding = (shuttleId: number, landedBySlot: number | null) => {
+    let hasSeenInFlight = false;
     return pollUntil(
       "deposit on the rollup",
       async () => {
@@ -200,7 +201,9 @@ export const createDepositQueue = ({ chain, owner, store, readNowMs = Date.now }
         const base = await chain.readBaseShuttle(shuttleId);
         if (!base.ok) return null;
         if (base.value.kind === "delegated") hasSeenInFlight = true;
-        return base.value.kind === "missing" && hasSeenInFlight ? true : null;
+        if (base.value.kind !== "missing") return null;
+        const isReadAfterLanding = landedBySlot !== null && base.value.slot >= landedBySlot;
+        return hasSeenInFlight || isReadAfterLanding ? true : null;
       },
       DEPOSIT_LANDING_TIMEOUT_MS,
       SHUTTLE_POLL_MS,
@@ -222,7 +225,7 @@ export const createDepositQueue = ({ chain, owner, store, readNowMs = Date.now }
       reportLedgerFailure(ledger.settle(current));
       return failure(`[runDeposit] the deposit failed on base and moved nothing: ${confirmed.reason}`);
     }
-    const landed = await waitForLanding(intent.value.shuttleId, confirmed.ok);
+    const landed = await waitForLanding(intent.value.shuttleId, confirmed.ok ? confirmed.value.slot : null);
     if (!landed.ok) {
       reportLedgerFailure(ledger.markStranded(current, landed.reason));
       return success({ state: "pending", signature, shuttleId: intent.value.shuttleId });

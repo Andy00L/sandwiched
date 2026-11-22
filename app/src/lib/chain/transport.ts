@@ -206,7 +206,7 @@ export const sendOnRollup = async (
 
 export type BaseSubmission = { signature: string; blockhash: string; lastValidBlockHeight: number; submittedAtMs: number };
 
-export type BaseSend = { signature: string; confirmMs: number };
+export type BaseSend = { signature: string; confirmMs: number; slot: number };
 
 export type BaseConfirmation = { ok: true; value: BaseSend } | (Failure & { hasLanded: boolean });
 
@@ -269,7 +269,7 @@ export const confirmOnBase = async (connection: Connection, submission: BaseSubm
   if (transactionError !== null) {
     return { ok: false, reason: `[confirmOnBase] ${signature} failed: ${JSON.stringify(transactionError)}`, hasLanded: true };
   }
-  return { ok: true, value: { signature, confirmMs: performance.now() - submission.submittedAtMs } };
+  return { ok: true, value: { signature, confirmMs: performance.now() - submission.submittedAtMs, slot: confirmed.value.context.slot } };
 };
 
 export const sendOnBase = async (

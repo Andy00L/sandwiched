@@ -19,6 +19,7 @@ const BLOCKHASH_LIFETIME_MS = 90_000;
 const SEARCH_TIMEOUT_MS = 900_000;
 const TICK_LIMIT_MS = 9_000;
 const PASSED = "no orphaned shuttle";
+const LANDED_SLOT = 1;
 
 type BaseKind = Exclude<BaseShuttle["kind"], "foreign">;
 type TxStatus = "sending" | "neverSent" | "inFlight" | "landed" | "failedOnBase";
@@ -191,8 +192,9 @@ const createTabChain = (run: Run, tab: Tab): DepositChain => {
       return observe<Result<ShuttleSighting>>(`readShuttle(${labelShuttle(run, shuttleId)})`, success(sighting), sighting);
     },
     readBaseShuttle: (shuttleId) => {
-      const kind = findShuttle(run, shuttleId)?.base ?? "missing";
-      const baseShuttle: BaseShuttle = { kind };
+      const shuttle = findShuttle(run, shuttleId);
+      const kind = shuttle?.base ?? "missing";
+      const baseShuttle: BaseShuttle = kind === "missing" ? { kind, slot: shuttle?.tx === "landed" ? LANDED_SLOT : LANDED_SLOT - 1 } : { kind };
       return observe<Result<BaseShuttle>>(`readBaseShuttle(${labelShuttle(run, shuttleId)})`, success(baseShuttle), kind);
     },
     submitDeposit: (units, shuttleId) => {
@@ -213,7 +215,7 @@ const createTabChain = (run: Run, tab: Tab): DepositChain => {
         {
           label: "base confirms the deposit",
           isPossible: shuttle.tx === "landed",
-          value: { ok: true, value: { signature: submission.signature, confirmMs: 1 } },
+          value: { ok: true, value: { signature: submission.signature, confirmMs: 1, slot: LANDED_SLOT } },
         },
         {
           label: "base reports the deposit failed",

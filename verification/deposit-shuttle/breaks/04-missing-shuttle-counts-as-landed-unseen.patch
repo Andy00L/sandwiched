@@ -1,11 +1,11 @@
 --- a/app/src/lib/chain/deposits.ts
 +++ b/app/src/lib/chain/deposits.ts
-@@ -186,7 +186,7 @@
-   };
- 
-   const waitForLanding = (shuttleId: number, hasConfirmedOnBase: boolean) => {
--    let hasSeenInFlight = hasConfirmedOnBase;
-+    let hasSeenInFlight = true;
-     return pollUntil(
-       "deposit on the rollup",
-       async () => {
+@@ -202,7 +202,7 @@
+         if (!base.ok) return null;
+         if (base.value.kind === "delegated") hasSeenInFlight = true;
+         if (base.value.kind !== "missing") return null;
+-        const isReadAfterLanding = landedBySlot !== null && base.value.slot >= landedBySlot;
++        const isReadAfterLanding = true;
+         return hasSeenInFlight || isReadAfterLanding ? true : null;
+       },
+       DEPOSIT_LANDING_TIMEOUT_MS,

@@ -9,6 +9,7 @@ import type { BaseConfirmation } from "./transport";
 const DEPOSIT_UNITS = 1_000n;
 const LANDING_WAIT_MS = 11_000;
 const TWO_MINUTES_MS = 120_000;
+const LANDED_SLOT = 500;
 const OWNER = Keypair.generate().publicKey;
 
 type FakeChainScript = {
@@ -24,13 +25,13 @@ const createFakeDepositChain = (script: FakeChainScript = {}) => {
   const calls = { submits: 0, merges: 0, redelegates: 0 };
   const chain: DepositChain = {
     readShuttle: async () => ({ ok: true, value: script.shuttle?.(shuttleReads++) ?? "absent" }),
-    readBaseShuttle: async () => ({ ok: true, value: script.baseShuttle?.(baseReads++) ?? { kind: "missing" } }),
+    readBaseShuttle: async () => ({ ok: true, value: script.baseShuttle?.(baseReads++) ?? { kind: "missing", slot: LANDED_SLOT - 1 } }),
     submitDeposit: async () => {
       calls.submits += 1;
       script.onSubmit?.();
       return { ok: true, value: { signature: "deposit-signature", blockhash: "hash", lastValidBlockHeight: 1, submittedAtMs: 0 } };
     },
-    confirmDeposit: async () => script.confirmation ?? { ok: true, value: { signature: "deposit-signature", confirmMs: 1 } },
+    confirmDeposit: async () => script.confirmation ?? { ok: true, value: { signature: "deposit-signature", confirmMs: 1, slot: LANDED_SLOT } },
     redelegateShuttle: async () => {
       calls.redelegates += 1;
       return { ok: true, value: null };
@@ -107,11 +108,19 @@ describe("createDepositQueue deposit", () => {
 
   test("lands when the shuttle closes on base after it was seen delegated", async () => {
     const store = createMemoryKeyStore();
-    const { chain } = createFakeDepositChain({ baseShuttle: (readIndex) => (readIndex < 2 ? { kind: "delegated" } : { kind: "missing" }) });
+    const { chain } = createFakeDepositChain({ baseShuttle: (readIndex) => (readIndex < 2 ? { kind: "delegated" } : { kind: "missing", slot: LANDED_SLOT - 1 }) });
     expect(readState(await settleWithFakeTime(createDepositQueue({ chain, owner: OWNER, store }).deposit(DEPOSIT_UNITS)))).toBe("landed");
   });
 
-  test("does not count a shuttle missing on base as landed before it was ever seen in flight", async () => {
+  test("lands when a base read at or after the deposit's slot finds the shuttle closed, without seeing it in flight", async () => {
+    const store = createMemoryKeyStore();
+    const { chain } = createFakeDepositChain({ baseShuttle: () => ({ kind: "missing", slot: LANDED_SLOT }) });
+    const queue = createDepositQueue({ chain, owner: OWNER, store });
+    expect(readState(await settleWithFakeTime(queue.deposit(DEPOSIT_UNITS)))).toBe("landed");
+    expect(queue.listPending()).toEqual([]);
+  });
+
+  test("does not count a shuttle missing on base as landed when the read lags behind the deposit's slot", async () => {
     const store = createMemoryKeyStore();
     const { chain } = createFakeDepositChain();
     const queue = createDepositQueue({ chain, owner: OWNER, store });
@@ -149,7 +158,7 @@ describe("createDepositQueue recoverPending", () => {
     const store = createMemoryKeyStore();
     const nowMs = { value: 1_000 };
     await strandOneDeposit(store, nowMs);
-    const { chain } = createFakeDepositChain({ baseShuttle: () => ({ kind: "missing" }) });
+    const { chain } = createFakeDepositChain({ baseShuttle: () => ({ kind: "missing", slot: LANDED_SLOT - 1 }) });
     const queue = createDepositQueue({ chain, owner: OWNER, store, readNowMs: () => nowMs.value });
     expect(await queue.recoverPending()).toMatchObject([{ state: "waiting" }]);
     expect(queue.listPending()).toHaveLength(1);
