@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { RecordedRound, RoundEvent } from "../../game/round-events";
 import { createBodyMemory, stepBody } from "./pigeon-body";
+import { toPigeonPose } from "./pigeon-pose";
+import type { PerchSpotTable } from "./pigeon-pose";
+import type { PigeonPose } from "./pigeon-actor";
+import type { PerchSpot } from "./perches";
 import type { BodyCommand, BodyMemory } from "./pigeon-body";
 import { createRoundDirector } from "./round-director";
 import type { SeatPose } from "./round-director";
@@ -10,6 +14,10 @@ const OTHER_SEAT = 1;
 const TICK_STEP = 10;
 const WAIT_TICKS = 100;
 const MAX_DEPTH = 14;
+const HOVER_SPOT: PerchSpot = { along: 5, deckZ: 1, facing: "left" };
+const PERCH_SPOTS: PerchSpotTable = Array.from({ length: 3 }, (_unusedBox, boxIndex) =>
+  Array.from({ length: 8 }, (_unusedSlot, slot): PerchSpot => ({ along: boxIndex * 10 + slot, deckZ: 0, facing: "right" })),
+);
 
 type Step =
   | "seat joins"
@@ -176,10 +184,11 @@ function successor(node: Node, step: Step): { node: Node; brokenRule: string | n
   const event = eventFor(step, tick);
   const next: Node = { path: [...node.path, step], events: event ? [...node.events, event] : node.events, tick, memory: { ...node.memory }, springs: node.springs };
   if (step !== "a frame renders") return { node: next, brokenRule: null };
-  const pose = poseAt(next);
-  const commands = stepBody(next.memory, pose.kind === "hidden", pose.kind === "stunned" ? pose.cause : null);
+  const truth = poseAt(next);
+  const shown: PigeonPose = toPigeonPose(truth, HOVER_SPOT, PERCH_SPOTS);
+  const commands = stepBody(next.memory, shown.kind === "hidden", shown.kind === "stunned" ? shown.cause : null);
   next.springs = commands.reduce(applyCommand, node.springs);
-  return { node: next, brokenRule: brokenRuleFor(pose, next.springs) };
+  return { node: next, brokenRule: brokenRuleFor(truth, next.springs) };
 }
 
 function explorePigeonLife(): { statesSeen: number; isExhausted: boolean; counterexample: { path: readonly Step[]; rule: string } | null } {
