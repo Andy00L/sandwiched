@@ -374,6 +374,29 @@ pub mod sandwich {
         Ok(())
     }
 
+    pub fn land_swat<'info>(ctx: Context<'info, TableRoster<'info>>) -> Result<()> {
+        let now_tick = current_tick()?;
+        let table_key = ctx.accounts.table.key();
+        let table = &mut ctx.accounts.table;
+        let (whale_seat, mut round) = live_round(table)?;
+        let mut seats = load_anted_seats(&table_key, table, ctx.remaining_accounts)?;
+        seats.retain(|seat| seat.seat_index != Some(whale_seat));
+        let mut pigeons: Vec<Pigeon> = seats.iter().map(|seat| seat.pigeon.into()).collect();
+        let report = round
+            .land_swat(&mut pigeons, now_tick, &rule_timing()?)
+            .map_err(SandwichError::from)?;
+        for (seat, pigeon) in seats.iter_mut().zip(pigeons) {
+            let landed = StoredPigeon::from(pigeon);
+            if seat.pigeon != landed {
+                seat.pigeon = landed;
+                seat.exit(&crate::ID)?;
+            }
+        }
+        table.round = round.into();
+        msg!("[land_swat] hits {} dropped {}", report.hit_count, report.dropped_crumbs);
+        Ok(())
+    }
+
     pub fn settle<'info>(ctx: Context<'info, TableRoster<'info>>) -> Result<()> {
         let now_tick = current_tick()?;
         let table_key = ctx.accounts.table.key();

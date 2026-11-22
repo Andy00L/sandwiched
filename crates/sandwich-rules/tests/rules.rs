@@ -367,3 +367,83 @@ fn pending_swats_apply_at_their_landing_tick_once_and_only_to_pigeons_standing_t
         }
     );
 }
+
+#[test]
+fn landing_a_swat_drops_every_hit_beak_on_the_box_once_so_the_next_peck_finds_loose_crumbs() {
+    let mut round = started_round();
+    let mut pigeons = [Pigeon::at_round_start(); 4];
+    let beak_targets = [4u64, 3, 1];
+    for pigeon in pigeons.iter_mut().take(beak_targets.len()) {
+        assert_eq!(round.fly_to(pigeon, SANDWICH_BOX, 0, &timing()), Ok(MoveOutcome::Moved));
+    }
+    let mut now_tick = timing().flight_ticks;
+    for peck_number in 0..4u64 {
+        for (pigeon, beak_target) in pigeons.iter_mut().zip(beak_targets) {
+            if peck_number < beak_target {
+                round.peck(pigeon, now_tick, &timing()).expect("a crumb");
+            }
+        }
+        now_tick += timing().peck_cooldown_ticks;
+    }
+    for pigeon in pigeons.iter_mut().take(beak_targets.len()) {
+        assert_eq!(round.fly_to(pigeon, EMPTY_BOX, now_tick, &timing()), Ok(MoveOutcome::Moved));
+    }
+    let swat = round
+        .raise_hand(EMPTY_BOX, now_tick + timing().flight_ticks, &timing())
+        .expect("a free hand");
+    let (lazy_round, lazy_pigeons) = (round, pigeons);
+
+    let no_hit = SwatReport { hit_count: 0, dropped_crumbs: 0 };
+    assert_eq!(round.land_swat(&mut pigeons, swat.lands_tick - 1, &timing()), Ok(no_hit));
+    assert_eq!(round.loose_crumbs, [0, 0, 0]);
+    assert_eq!(
+        round.land_swat(&mut pigeons, swat.lands_tick, &timing()),
+        Ok(SwatReport { hit_count: 3, dropped_crumbs: 5 })
+    );
+    assert_eq!(round.loose_crumbs[usize::from(EMPTY_BOX)], 5);
+    assert_eq!(pigeons.map(|pigeon| pigeon.beak_crumbs), [2, 1, 0, 0]);
+    let stunned = PigeonState::Stunned {
+        box_index: EMPTY_BOX,
+        until_tick: swat.lands_tick + timing().swat_stun_ticks,
+    };
+    for pigeon in pigeons.iter().take(beak_targets.len()) {
+        assert_eq!(pigeon.state, stunned);
+        assert_eq!(pigeon.last_swat_number, swat.number);
+    }
+    assert_eq!(round.crumbs_in_play(&pigeons), Some(u64::from(EIGHT_PLAYERS) * CHIPS_PER_ANTE));
+
+    let (landed_round, landed_pigeons) = (round, pigeons);
+    for later_tick in [swat.lands_tick, swat.lands_tick + 1] {
+        assert_eq!(round.land_swat(&mut pigeons, later_tick, &timing()), Ok(no_hit));
+        assert_eq!((round, pigeons), (landed_round, landed_pigeons));
+    }
+
+    let latecomer_landed_tick = swat.lands_tick + timing().flight_ticks;
+    let [.., latecomer] = &mut pigeons;
+    round.fly_to(latecomer, EMPTY_BOX, swat.lands_tick, &timing()).expect("a free perch");
+    assert_eq!(
+        round.peck(latecomer, latecomer_landed_tick, &timing()),
+        Ok(PeckOutcome::TookLooseCrumb)
+    );
+    assert_eq!(round.loose_crumbs[usize::from(EMPTY_BOX)], 4);
+
+    let (mut lazy_round, [.., mut lazy_latecomer]) = (lazy_round, lazy_pigeons);
+    lazy_round
+        .fly_to(&mut lazy_latecomer, EMPTY_BOX, swat.lands_tick, &timing())
+        .expect("a free perch");
+    assert_eq!(
+        lazy_round.peck(&mut lazy_latecomer, latecomer_landed_tick, &timing()),
+        Ok(PeckOutcome::StunnedOnEmptyBox)
+    );
+}
+
+#[test]
+fn landing_a_swat_after_the_round_ends_is_refused_and_changes_nothing() {
+    let mut round = started_round();
+    let (pigeon, _) = perched_pigeon(&mut round, SANDWICH_BOX, 0);
+    let mut pigeons = [pigeon];
+    let (round_before, pigeons_before) = (round, pigeons);
+    let end_tick = round.end_tick;
+    assert_eq!(round.land_swat(&mut pigeons, end_tick, &timing()), Err(RuleError::RoundOver));
+    assert_eq!((round, pigeons), (round_before, pigeons_before));
+}

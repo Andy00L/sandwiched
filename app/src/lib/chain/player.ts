@@ -8,6 +8,7 @@ import {
   buildFaucetInstructions,
   buildFlyToInstruction,
   buildJoinInstruction,
+  buildLandSwatInstruction,
   buildLeaveInstruction,
   buildPeckInstruction,
   buildRaiseHandInstruction,
@@ -67,6 +68,7 @@ export type SeatActions = {
   buyIn: (chips: bigint) => Promise<RollupAck>;
   cashOut: (chips: bigint) => Promise<RollupAck>;
   startRound: () => Promise<RollupAck>;
+  landSwat: (seats: PublicKey[]) => Promise<RollupAck>;
   settle: (seats: PublicKey[]) => Promise<RollupAck>;
 };
 
@@ -105,6 +107,7 @@ export const createSeatActions = ({ client, table, mint, wallet, session }: Seat
     buyIn: (chips) => send(() => buildBuyInInstruction(program, wallet.publicKey, table, mint, chips), wallet),
     cashOut: (chips) => send(() => buildCashOutInstruction(program, actor, mint, chips), actionSigner),
     startRound: () => send(() => buildStartRoundInstruction(program, actionSigner.publicKey, table), actionSigner),
+    landSwat: (seats) => send(() => buildLandSwatInstruction(program, table, seats), actionSigner),
     settle: (seats) => send(() => buildSettleInstruction(program, table, seats), actionSigner),
   };
 };

@@ -258,10 +258,9 @@ impl Round {
         if now_tick < self.end_tick {
             return Err(RuleError::RoundNotOver);
         }
-        let end_tick = self.end_tick;
+        self.apply_landed_swats_to_all(pigeons, self.end_tick, timing)?;
         let mut pigeon_crumbs: u64 = 0;
-        for pigeon in pigeons.iter_mut() {
-            self.apply_landed_swats(pigeon, end_tick, timing)?;
+        for pigeon in pigeons.iter() {
             pigeon_crumbs = pigeon_crumbs
                 .checked_add(pigeon.beak_crumbs)
                 .ok_or(RuleError::MathOverflow)?;
@@ -290,6 +289,21 @@ impl Round {
         let report = next_round.apply_landed_swats(&mut next_pigeon, now_tick, timing)?;
         *self = next_round;
         *pigeon = next_pigeon;
+        Ok(report)
+    }
+
+    pub fn land_swat(
+        &mut self,
+        pigeons: &mut [Pigeon],
+        now_tick: u64,
+        timing: &Timing,
+    ) -> Result<SwatReport, RuleError> {
+        self.ensure_live(now_tick)?;
+        let mut next_round = *self;
+        let mut next_pigeons = pigeons.to_vec();
+        let report = next_round.apply_landed_swats_to_all(&mut next_pigeons, now_tick, timing)?;
+        *self = next_round;
+        pigeons.copy_from_slice(&next_pigeons);
         Ok(report)
     }
 
@@ -392,6 +406,27 @@ impl Round {
         }
         pigeon.state = pigeon.state.settled_at(now_tick);
         Ok(report)
+    }
+
+    fn apply_landed_swats_to_all(
+        &mut self,
+        pigeons: &mut [Pigeon],
+        now_tick: u64,
+        timing: &Timing,
+    ) -> Result<SwatReport, RuleError> {
+        let mut total = SwatReport { hit_count: 0, dropped_crumbs: 0 };
+        for pigeon in pigeons.iter_mut() {
+            let report = self.apply_landed_swats(pigeon, now_tick, timing)?;
+            total.hit_count = total
+                .hit_count
+                .checked_add(report.hit_count)
+                .ok_or(RuleError::MathOverflow)?;
+            total.dropped_crumbs = total
+                .dropped_crumbs
+                .checked_add(report.dropped_crumbs)
+                .ok_or(RuleError::MathOverflow)?;
+        }
+        Ok(total)
     }
 }
 

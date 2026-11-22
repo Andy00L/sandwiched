@@ -1078,6 +1078,45 @@ export type Sandwich = {
       "args": []
     },
     {
+      "name": "landSwat",
+      "discriminator": [
+        84,
+        75,
+        146,
+        33,
+        29,
+        82,
+        20,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  98,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table.table_id",
+                "account": "table"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "leave",
       "discriminator": [
         59,

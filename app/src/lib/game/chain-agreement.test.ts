@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createFakeChain, ingestChange } from "../../../tests/fake-chain";
+import { createFakeChain, ingestChange, type SwatLandingMode } from "../../../tests/fake-chain";
 import { LIVE_TIMING } from "./chain-rules";
 import { parseRecordedRound, type RecordedRound, type RoundEvent } from "./round-events";
 import { createTableStore } from "./table-store";
@@ -17,8 +17,8 @@ const ROUNDS = new Map(
   }),
 );
 
-function playOnFakeChain(round: RecordedRound, eventCount: number = round.events.length) {
-  const chain = createFakeChain(round);
+function playOnFakeChain(round: RecordedRound, swatLanding: SwatLandingMode, eventCount: number = round.events.length) {
+  const chain = createFakeChain(round, swatLanding);
   const store = createTableStore({ ownWallet: null, horizonTicks: 0, now: () => 0 });
   for (const event of round.events.slice(0, eventCount)) {
     for (const change of chain.apply(event)) ingestChange(store, change);
@@ -38,20 +38,27 @@ describe("the chain adapter against the recorded rounds", () => {
     for (const round of ROUNDS.values()) expect(round.timing).toEqual(LIVE_TIMING);
   });
 
+  test.each([...ROUNDS.keys()])("%s: snapshots from a chain that lands every swat give back the recorded events exactly", (fileName) => {
+    const round = ROUNDS.get(fileName);
+    expect(round).toBeDefined();
+    if (round === undefined) return;
+    expect(playOnFakeChain(round, "landSwat").events).toEqual([...round.events]);
+  });
+
   test.each(EXACT_ROUND_FILES)("%s: snapshots from a lazy chain give back the recorded events exactly", (fileName) => {
     const round = ROUNDS.get(fileName);
     expect(round).toBeDefined();
     if (round === undefined) return;
-    expect(playOnFakeChain(round).events).toEqual([...round.events]);
+    expect(playOnFakeChain(round, "lazy").events).toEqual([...round.events]);
   });
 
   test.each(OWED_CRUMB_ROUND_FILES)(
-    "%s: the streams differ only in pecks that meet crumbs a swat knocked loose but the chain has not credited yet",
+    "%s: without land_swat the streams differ only in pecks that meet crumbs a swat knocked loose but the chain has not credited yet",
     (fileName) => {
       const round = ROUNDS.get(fileName);
       expect(round).toBeDefined();
       if (round === undefined) return;
-      const { chain, events, view } = playOnFakeChain(round);
+      const { chain, events, view } = playOnFakeChain(round, "lazy");
       const gapIndexes = round.events.flatMap((event, index) => (Bun.deepEquals(event, events[index]) ? [] : [index]));
       expect(events).toHaveLength(round.events.length);
       expect(gapIndexes.length).toBeGreaterThan(0);
@@ -64,7 +71,7 @@ describe("the chain adapter against the recorded rounds", () => {
       const firstGap = round.events[firstGapIndex];
       expect(firstGap?.kind === "pecked" ? firstGap.outcome : null).toBe("looseCrumb");
       const box = firstGap?.kind === "pecked" ? firstGap.box : 0;
-      const beforeGap = playOnFakeChain(round, firstGapIndex);
+      const beforeGap = playOnFakeChain(round, "lazy", firstGapIndex);
       const chainLoose = beforeGap.chain.table().round.looseCrumbs.map(Number);
       const chainBeaks = beforeGap.chain.seats().reduce((total, seat) => total + Number(seat.beakCrumbs), 0);
       const viewLoose = beforeGap.view?.looseCrumbs ?? [];

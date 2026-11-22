@@ -1,6 +1,6 @@
 use proptest::prelude::*;
 use sandwich_rules::constants::{CHIPS_PER_ANTE, MAX_BOXES, PERCHES_PER_BOX};
-use sandwich_rules::{PeckOutcome, Pigeon, Round, RuleError, Timing};
+use sandwich_rules::{PeckOutcome, Pigeon, Round, RuleError, SwatReport, Timing};
 
 const TICK_MS: u64 = 10;
 const MAX_TICK_STEP: u64 = 120;
@@ -13,6 +13,7 @@ enum Action {
     TakeOff { pigeon: usize },
     RaiseHand { box_index: u8 },
     Switch { box_index: u8 },
+    LandSwat,
 }
 
 fn action_strategy() -> impl Strategy<Value = Action> {
@@ -22,6 +23,7 @@ fn action_strategy() -> impl Strategy<Value = Action> {
         1 => (0usize..20).prop_map(|pigeon| Action::TakeOff { pigeon }),
         2 => (0u8..4).prop_map(|box_index| Action::RaiseHand { box_index }),
         1 => (0u8..4).prop_map(|box_index| Action::Switch { box_index }),
+        2 => Just(Action::LandSwat),
     ]
 }
 
@@ -84,6 +86,17 @@ proptest! {
                 }
                 Action::RaiseHand { box_index } => round.raise_hand(box_index, now_tick, &timing).err(),
                 Action::Switch { box_index } => round.switch_sandwich(box_index, now_tick, &timing).err(),
+                Action::LandSwat => {
+                    let landed = round.land_swat(&mut pigeons, now_tick, &timing);
+                    if landed.is_ok() {
+                        let (landed_round, landed_pigeons) = (round, pigeons.clone());
+                        let again = round.land_swat(&mut pigeons, now_tick, &timing);
+                        prop_assert_eq!(again, Ok(SwatReport { hit_count: 0, dropped_crumbs: 0 }));
+                        prop_assert_eq!(round, landed_round);
+                        prop_assert_eq!(&pigeons, &landed_pigeons);
+                    }
+                    landed.err()
+                }
             };
 
             if refused.is_some() {

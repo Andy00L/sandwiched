@@ -208,12 +208,13 @@ export const buildStartRoundIx = (program: SandwichProgram, payer: PublicKey, ta
     .accountsPartial({ payer, table, programIdentity: findAddress([Buffer.from("identity")]) })
     .instruction();
 
+const toRosterAccounts = (seats: PublicKey[]) => seats.map((seat) => ({ pubkey: seat, isSigner: false, isWritable: true }));
+
+export const buildLandSwatIx = (program: SandwichProgram, table: PublicKey, seats: PublicKey[]): Promise<TransactionInstruction> =>
+  program.methods.landSwat().accountsStrict({ table }).remainingAccounts(toRosterAccounts(seats)).instruction();
+
 export const buildSettleIx = (program: SandwichProgram, table: PublicKey, seats: PublicKey[]): Promise<TransactionInstruction> =>
-  program.methods
-    .settle()
-    .accountsStrict({ table })
-    .remainingAccounts(seats.map((seat) => ({ pubkey: seat, isSigner: false, isWritable: true })))
-    .instruction();
+  program.methods.settle().accountsStrict({ table }).remainingAccounts(toRosterAccounts(seats)).instruction();
 
 export const buildCreateSessionIx = (session: SessionProgram, payer: PublicKey, wallet: PublicKey, sessionSigner: PublicKey, validUntilUnix: number) =>
   session.methods

@@ -7,6 +7,8 @@ import type { PigeonView } from "../src/lib/game/view-state";
 
 export type ChainChange = { kind: "table"; snapshot: TableSnapshot } | { kind: "seat"; snapshot: SeatSnapshot };
 
+export type SwatLandingMode = "lazy" | "landSwat";
+
 const SEAT_COUNT = 21;
 const SWAT_HISTORY_LENGTH = 8;
 const KEY_FAMILY_TABLE = 1;
@@ -106,7 +108,11 @@ export function ingestChange(store: TableStore, change: ChainChange): void {
   else store.ingestSeat(change.snapshot);
 }
 
-export function createFakeChain(recorded: RecordedRound): FakeChain {
+function isSamePigeon(left: ChainPigeon, right: ChainPigeon): boolean {
+  return left.beakCrumbs === right.beakCrumbs && left.lastSwatNumber === right.lastSwatNumber && Bun.deepEquals(left.pigeon, right.pigeon);
+}
+
+export function createFakeChain(recorded: RecordedRound, swatLanding: SwatLandingMode = "lazy"): FakeChain {
   const timing: RoundTiming = recorded.timing;
   let table = buildTableSnapshot({ boxCount: recorded.boxCount });
   const seats = new Map<number, SeatSnapshot>();
@@ -168,6 +174,27 @@ export function createFakeChain(recorded: RecordedRound): FakeChain {
     return [writeRound(tick, { looseCrumbs }), writePigeon(seat, tick, { ...touched.pigeon, pigeon: stunned }, nextPeckTick)];
   };
 
+  const touchRoundPigeons = (whaleSeat: number, tick: number) => {
+    let looseCrumbs = table.round.looseCrumbs;
+    const pigeons = table.antedSeatIndexes
+      .filter((seat) => seat !== whaleSeat)
+      .map((seat) => {
+        const touched = touchPigeon(seat, tick, looseCrumbs);
+        looseCrumbs = touched.looseCrumbs;
+        return { seat, before: readChainPigeon(readSeat(seat)), pigeon: touched.pigeon };
+      });
+    return { pigeons, looseCrumbs };
+  };
+
+  const landSwat = (tick: number): ChainChange[] => {
+    if (table.phase.state !== "live" || tick >= Number(table.round.endTick)) return [];
+    const { pigeons, looseCrumbs } = touchRoundPigeons(table.phase.whaleSeat, tick);
+    const seatChanges = pigeons
+      .filter((touched) => !isSamePigeon(touched.before, touched.pigeon))
+      .map((touched) => writePigeon(touched.seat, tick, touched.pigeon));
+    return [writeRound(tick, { looseCrumbs }), ...seatChanges];
+  };
+
   const raiseHand = (tick: number, box: number): ChainChange[] => {
     const number = table.round.swatCount + 1n;
     const landsTick = BigInt(tick + timing.swatWindupTicks);
@@ -178,14 +205,7 @@ export function createFakeChain(recorded: RecordedRound): FakeChain {
   const settle = (tick: number): ChainChange[] => {
     if (table.phase.state !== "live") return [];
     const whaleSeat = table.phase.whaleSeat;
-    const endTick = Number(table.round.endTick);
-    const pigeonSeats = table.antedSeatIndexes.filter((seat) => seat !== whaleSeat);
-    let looseCrumbs = table.round.looseCrumbs;
-    const settledPigeons = pigeonSeats.map((seat) => {
-      const touched = touchPigeon(seat, endTick, looseCrumbs);
-      looseCrumbs = touched.looseCrumbs;
-      return { seat, pigeon: touched.pigeon };
-    });
+    const { pigeons: settledPigeons, looseCrumbs } = touchRoundPigeons(whaleSeat, Number(table.round.endTick));
     const pigeonCrumbs = settledPigeons.reduce((total, settled) => total + settled.pigeon.beakCrumbs, 0);
     const whaleCrumbs = Number(table.round.potCrumbs + looseCrumbs.reduce((total, loose) => total + loose, 0n));
     const seatChanges = settledPigeons.map((settled) =>
@@ -264,8 +284,9 @@ export function createFakeChain(recorded: RecordedRound): FakeChain {
         return raiseHand(tick, event.box);
       case "settled":
         return settle(tick);
-      case "landed":
       case "swatLanded":
+        return swatLanding === "landSwat" ? landSwat(tick) : [];
+      case "landed":
       case "stunEnded":
         return [];
     }

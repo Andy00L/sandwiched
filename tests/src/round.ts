@@ -20,7 +20,7 @@ import {
   getValidatorIdentity,
   isDelegatedOnRollup,
   loadAdmin,
-  readComputeUnits,
+  readExecution,
   readLamports,
   readTokenUnits,
   sendOnBase,
@@ -44,6 +44,7 @@ import {
   buildFaucetIx,
   buildFlyToIx,
   buildJoinIx,
+  buildLandSwatIx,
   buildPeckIx,
   buildRaiseHandIx,
   buildRevokeSessionIx,
@@ -86,6 +87,8 @@ const BLOCKHASH_REFRESH_MS = 1_000;
 
 type Player = { name: string; wallet: Keypair; sessionSigner: Keypair };
 type ActionRecord = { player: string; action: string; ok: boolean; kind: string; error: string | null; sentAtMs: number; ackMs: number };
+type SwatLanding = { signature: string; landsTick: bigint; looseBefore: bigint[]; looseAfter: bigint[] };
+type LandedSwat = SwatLanding & { computeUnits: number | null; programLog: string | null };
 type Context = {
   program: SandwichProgram;
   session: SessionProgram;
@@ -219,8 +222,29 @@ const watchStuns = (context: Context, players: Player[], tally: StunTally): numb
   );
 };
 
-const playRound = async (context: Context, players: Player[], live: TableView, liveTable: { view: TableView }): Promise<ActionRecord[]> => {
-  if (live.phase.kind !== "live") return [];
+const LAND_SWAT_LOG_PREFIX = "Program log: [land_swat]";
+
+const readLandedSwats = async (context: Context, landings: SwatLanding[]): Promise<LandedSwat[]> => {
+  const landed: LandedSwat[] = [];
+  for (const landing of landings) {
+    const execution = await pollUntil(`land_swat ${landing.signature}`, () => readExecution(context.rollup, landing.signature), 10_000, 250);
+    landed.push({
+      ...landing,
+      computeUnits: execution.ok ? execution.value.computeUnits : null,
+      programLog: execution.ok ? (execution.value.logs.find((line) => line.startsWith(LAND_SWAT_LOG_PREFIX)) ?? null) : null,
+    });
+  }
+  return landed;
+};
+
+const playRound = async (
+  context: Context,
+  players: Player[],
+  live: TableView,
+  liveTable: { view: TableView },
+): Promise<{ records: ActionRecord[]; landings: SwatLanding[] }> => {
+  const landings: SwatLanding[] = [];
+  if (live.phase.kind !== "live") return { records: [], landings };
   const whaleWallet = live.seats[live.phase.whaleSeat];
   const whale = players.find((player) => whaleWallet !== undefined && player.wallet.publicKey.equals(whaleWallet));
   const pigeons = players.filter((player) => player !== whale);
@@ -279,15 +303,34 @@ const playRound = async (context: Context, players: Player[], live: TableView, l
     await sleep(EMPTY_BOX_STUN_WAIT_MS);
     await greedy(player);
   };
+  const seats = players.map((player) => seatPda(context.table, player.wallet.publicKey));
+  const landRaisedSwat = async (player: Player) => {
+    const raised = await fetchTable(context.program, context.rollup, context.table);
+    if (raised === null || raised.hand.kind !== "raised") return;
+    const landsTick = raised.hand.landsTick;
+    const hasLanded = await pollUntil(
+      "swat landing slot",
+      async () => (BigInt(await context.rollup.getSlot("processed")) >= landsTick ? true : null),
+      PROPAGATION_TIMEOUT_MS,
+      FAST_POLL_MS,
+    );
+    if (!hasLanded.ok) return;
+    const looseBefore = (await fetchTable(context.program, context.rollup, context.table))?.looseCrumbs ?? [];
+    const ack = await act(player, "land_swat", await buildLandSwatIx(context.program, context.table, seats));
+    const looseAfter = (await fetchTable(context.program, context.rollup, context.table))?.looseCrumbs ?? [];
+    if (ack.ok) landings.push({ signature: ack.signature, landsTick, looseBefore, looseAfter });
+  };
   const whaleLoop = async (player: Player) => {
     while (isPlaying()) {
       await sleep(SWAT_INTERVAL_MS);
-      if (isPlaying()) await act(player, "raise_hand", await buildRaiseHandIx(context.program, actorOf(context, player), sandwichBox));
+      if (!isPlaying()) continue;
+      const raised = await act(player, "raise_hand", await buildRaiseHandIx(context.program, actorOf(context, player), sandwichBox));
+      if (raised.ok) await landRaisedSwat(player);
     }
   };
   const roles = pigeons.map((pigeon, index) => (index === 3 ? nervous(pigeon) : index === 4 ? wanderer(pigeon) : greedy(pigeon)));
   await Promise.all([...roles, ...(whale === undefined ? [] : [whaleLoop(whale)])]);
-  return records;
+  return { records, landings };
 };
 
 const settleRound = async (context: Context, players: Player[], endTick: bigint): Promise<Result<{ signature: string; computeUnits: number | null }>> => {
@@ -302,8 +345,8 @@ const settleRound = async (context: Context, players: Player[], endTick: bigint)
   const settled = await sendSetupOnRollup(context, "settle", await buildSettleIx(context.program, context.table, seats), context.admin);
   if (!settled.ok || !settled.value.ok) return failure(settled.ok ? "[settleRound] no signature" : settled.reason);
   const signature = settled.value.signature;
-  const computeUnits = await pollUntil("settle transaction", () => readComputeUnits(context.rollup, signature), 10_000, 250);
-  return success({ signature, computeUnits: computeUnits.ok ? computeUnits.value : null });
+  const execution = await pollUntil("settle transaction", () => readExecution(context.rollup, signature), 10_000, 250);
+  return success({ signature, computeUnits: execution.ok ? execution.value.computeUnits : null });
 };
 
 const cashOutAndWithdraw = async (context: Context, player: Player): Promise<Result<bigint>> => {
@@ -424,9 +467,10 @@ const runHeadlessRound = async (): Promise<Result<Record<string, unknown>>> => {
   liveTable.view = live.value;
   log("runHeadlessRound", `whale drawn in ${drawMs.toFixed(0)} ms, sandwich box ${live.value.sandwichBox}, end tick ${live.value.endTick}`);
 
-  const records = await playRound(context, players, live.value, liveTable);
+  const { records, landings } = await playRound(context, players, live.value, liveTable);
   const settled = await settleRound(context, players, live.value.endTick);
   if (!settled.ok) return settled;
+  const landedSwats = await readLandedSwats(context, landings);
   const afterSettle = await fetchTable(program, rollup, table);
   const seatsAfter = await readSeats(context, players);
   if (!seatsAfter.ok || afterSettle === null) return failure("[runHeadlessRound] cannot read the table after settle");
@@ -474,9 +518,14 @@ const runHeadlessRound = async (): Promise<Result<Record<string, unknown>>> => {
     },
     ackMs: { all: summarize(records.map((record) => record.ackMs)), succeeded: summarize(succeeded.map((record) => record.ackMs)) },
     settle: settled.value,
+    landSwat: {
+      succeeded: landedSwats.length,
+      computeUnits: summarize(landedSwats.flatMap((landed) => (landed.computeUnits === null ? [] : [landed.computeUnits]))),
+      firstWithDrops: landedSwats.find((landed) => landed.programLog !== null && !landed.programLog.endsWith("dropped 0")) ?? null,
+    },
     adminSpentLamports: adminLamportsBefore - adminLamportsAfter,
   };
-  writeRunRecord(runName, { ...report, records });
+  writeRunRecord(runName, { ...report, records, landedSwats });
   return success(report);
 };
 

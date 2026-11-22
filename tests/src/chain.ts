@@ -196,7 +196,11 @@ export const readTokenUnits = async (connection: Connection, account: PublicKey)
 export const readLamports = async (connection: Connection, account: PublicKey): Promise<number> =>
   (await connection.getAccountInfo(account, "confirmed"))?.lamports ?? 0;
 
-export const readComputeUnits = async (connection: Connection, signature: string): Promise<number | null> => {
+export type Execution = { computeUnits: number; logs: string[] };
+
+export const readExecution = async (connection: Connection, signature: string): Promise<Execution | null> => {
   const fetched = await attempt(() => connection.getTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }));
-  return fetched.ok ? (fetched.value?.meta?.computeUnitsConsumed ?? null) : null;
+  const meta = fetched.ok ? fetched.value?.meta : null;
+  if (meta === null || meta === undefined || meta.computeUnitsConsumed === undefined) return null;
+  return { computeUnits: meta.computeUnitsConsumed, logs: meta.logMessages ?? [] };
 };

@@ -161,12 +161,13 @@ export const buildStartRoundInstruction = (program: SandwichProgram, payer: Publ
     .accountsPartial({ payer, table, programIdentity: findProgramIdentityAddress() })
     .instruction();
 
+const toRosterAccounts = (seats: PublicKey[]) => seats.map((seat) => ({ pubkey: seat, isSigner: false, isWritable: true }));
+
+export const buildLandSwatInstruction = (program: SandwichProgram, table: PublicKey, seats: PublicKey[]) =>
+  program.methods.landSwat().accountsStrict({ table }).remainingAccounts(toRosterAccounts(seats)).instruction();
+
 export const buildSettleInstruction = (program: SandwichProgram, table: PublicKey, seats: PublicKey[]) =>
-  program.methods
-    .settle()
-    .accountsStrict({ table })
-    .remainingAccounts(seats.map((seat) => ({ pubkey: seat, isSigner: false, isWritable: true })))
-    .instruction();
+  program.methods.settle().accountsStrict({ table }).remainingAccounts(toRosterAccounts(seats)).instruction();
 
 export const buildCreateSessionInstruction = (
   session: SessionProgram,
