@@ -5,7 +5,7 @@
     "maxDepth": 0.015,
     "reason": "each arm card tilts its own normal toward the camera, so the two planes meet inside the 0.5-unit elbow overlap; moving the forearm toward the camera does not clear it",
     "until": "2026-12-06",
-    "approvedBy": null
+    "approvedBy": "Andy, 2026-11-22"
   },
   {
     "a": "whale arm right upper",
@@ -13,6 +13,6 @@
     "maxDepth": 0.015,
     "reason": "same elbow overlap as the left arm",
     "until": "2026-12-06",
-    "approvedBy": null
+    "approvedBy": "Andy, 2026-11-22"
   }
 ]
