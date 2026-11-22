@@ -3,10 +3,11 @@ import type { Connection, Keypair } from "@solana/web3.js";
 import { findTestMintAddress } from "./addresses";
 import { BASE_RPC_URL } from "./config";
 import { restoreKeypair } from "./guest-key";
-import { type RateLimits, createRateLimiter } from "./rate-limit";
+import { readRedis } from "../redis";
 import { type Result, attempt, attemptSync, failure, success } from "./result";
 import { createRpcConnection } from "./rpc";
-import { type BalanceReading, type SpendRule, createSpendBudget } from "./spend-budget";
+import type { BalanceReading, SpendRule } from "./spend-budget";
+import { type SponsorGuards, type SponsorLimits, createMemorySponsorGuards, createSharedSponsorGuards } from "./sponsor-guards";
 import { parseSponsorRequest, reviewSponsoredTransaction } from "./sponsor-policy";
 
 export const SPONSOR_KEYPAIR_PATH_ENV = "SANDWICH_SPONSOR_KEYPAIR_PATH";
@@ -16,16 +17,17 @@ export const MAX_SPONSOR_BODY_BYTES = 4_096;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 const LAMPORTS_PER_SOL = 1_000_000_000;
-const SPONSOR_RATE_LIMITS: RateLimits = {
-  perIp: { limit: 60, windowMs: HOUR_MS },
-  perWallet: { limit: 12, windowMs: HOUR_MS },
-};
-const RATE_LIMIT_MAX_ENTRIES = 10_000;
 export const SPONSOR_SPEND_RULES: readonly SpendRule[] = [
   { windowMs: HOUR_MS, limitLamports: LAMPORTS_PER_SOL },
   { windowMs: DAY_MS, limitLamports: 5 * LAMPORTS_PER_SOL },
 ];
 export const SPONSOR_RESERVED_LAMPORTS_PER_TRANSACTION = 10_000_000;
+export const SPONSOR_LIMITS: SponsorLimits = {
+  rates: { perIp: { limit: 60, windowMs: HOUR_MS }, perWallet: { limit: 12, windowMs: HOUR_MS } },
+  spendRules: SPONSOR_SPEND_RULES,
+  reservedLamportsPerTransaction: SPONSOR_RESERVED_LAMPORTS_PER_TRANSACTION,
+  maxMemoryEntries: 10_000,
+};
 export const SPONSOR_BALANCE_CACHE_MS = 5_000;
 
 export type SponsorReply = { status: number; body: Record<string, string | number | boolean> };
@@ -55,10 +57,9 @@ export const createSponsorService = (
   keypair: Keypair,
   connection: SponsorConnection,
   readNowMs: () => number = Date.now,
+  guards: SponsorGuards = createMemorySponsorGuards(SPONSOR_LIMITS),
 ): SponsorService => {
   const policy = { sponsor: keypair.publicKey, testMint: findTestMintAddress() };
-  const rateLimiter = createRateLimiter(SPONSOR_RATE_LIMITS, RATE_LIMIT_MAX_ENTRIES);
-  const spendBudget = createSpendBudget(SPONSOR_SPEND_RULES, SPONSOR_RESERVED_LAMPORTS_PER_TRANSACTION);
   let cachedBalance: BalanceReading | null = null;
   let balanceInFlight: Promise<Result<BalanceReading>> | null = null;
 
@@ -87,14 +88,17 @@ export const createSponsorService = (
     const transaction = parsed.value;
     const review = reviewSponsoredTransaction(transaction, policy);
     if (!review.ok) return refuse(400, review.reason);
-    const decision = rateLimiter.decide({ ip, wallet: review.value.wallet?.toBase58() ?? null }, readNowMs());
+    const decision = await guards.admitRequest({ ip, wallet: review.value.wallet?.toBase58() ?? null }, readNowMs());
+    if (!decision.isAllowed && decision.scope === "limiter") {
+      return { status: 503, body: { reason: "the rate limiter is unreachable, try again or connect a wallet", retryAfterMs: decision.retryAfterMs } };
+    }
     if (!decision.isAllowed) {
       return { status: 429, body: { reason: `too many sponsored transactions for this ${decision.scope}`, retryAfterMs: decision.retryAfterMs } };
     }
     const balance = await readBalance();
     if (!balance.ok) return refuse(502, "the sponsor balance cannot be read");
     if (balance.value.lamports < SPONSOR_MIN_LAMPORTS) return refuse(503, "the sponsor is low on SOL, connect a wallet");
-    const budget = spendBudget.decide(balance.value, readNowMs());
+    const budget = await guards.admitSpend(balance.value, readNowMs());
     if (!budget.isAllowed) {
       return { status: 503, body: { reason: "the sponsor spent its budget for now, connect a wallet", retryAfterMs: budget.retryAfterMs } };
     }
@@ -115,6 +119,9 @@ export const resolveSponsorService = (): Result<SponsorService> => {
   if (cachedService !== null) return success(cachedService);
   const keypair = loadSponsorKeypair(process.env[SPONSOR_KEYPAIR_PATH_ENV]);
   if (!keypair.ok) return failure(`[resolveSponsorService] ${keypair.reason}`);
-  cachedService = createSponsorService(keypair.value, createRpcConnection(BASE_RPC_URL, { commitment: "confirmed" }));
+  const redis = readRedis();
+  if (!redis.ok) console.warn(`[resolveSponsorService] sponsor limits stay in this instance's memory: ${redis.reason}`);
+  const guards = redis.ok ? createSharedSponsorGuards(redis.value, SPONSOR_LIMITS) : createMemorySponsorGuards(SPONSOR_LIMITS);
+  cachedService = createSponsorService(keypair.value, createRpcConnection(BASE_RPC_URL, { commitment: "confirmed" }), Date.now, guards);
   return success(cachedService);
 };

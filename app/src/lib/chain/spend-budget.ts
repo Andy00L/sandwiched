@@ -1,6 +1,6 @@
 export type SpendRule = { windowMs: number; limitLamports: number };
 export type BalanceReading = { lamports: number; readAtMs: number };
-type SpendDecision = { isAllowed: true } | { isAllowed: false; retryAfterMs: number };
+export type SpendDecision = { isAllowed: true } | { isAllowed: false; retryAfterMs: number };
 
 type SpendWindow = { startedAtMs: number; startLamports: number };
 

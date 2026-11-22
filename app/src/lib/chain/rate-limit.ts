@@ -3,7 +3,7 @@ type RateRule = { limit: number; windowMs: number };
 export type RateLimits = { perIp: RateRule; perWallet: RateRule };
 export type RateRequest = { ip: string; wallet: string | null };
 
-export type RateDecision = { isAllowed: true } | { isAllowed: false; scope: "ip" | "wallet"; retryAfterMs: number };
+export type RateDecision = { isAllowed: true } | { isAllowed: false; scope: "ip" | "wallet" | "limiter"; retryAfterMs: number };
 
 export type RateLimiter = { decide: (request: RateRequest, nowMs: number) => RateDecision; countEntries: () => number };
 
