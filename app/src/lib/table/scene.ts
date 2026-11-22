@@ -37,6 +37,7 @@ import type { RecordedRound } from "../game/round-events";
 import { GROUND_INKS } from "./palette";
 import { placeOnTable } from "./layout";
 import { buildLunchbox, LUNCHBOX_LOOKS } from "./pieces/lunchbox";
+import { buildLawnFillers } from "./pieces/lawn";
 import { buildCrumbScatter, buildLunchClutter } from "./pieces/lunch";
 import { buildFlowerBed, buildHedge, buildLampPost, buildLitterBin, buildParkBench, buildParkSign, buildPlaneTree } from "./pieces/park";
 import { PIGEON_VARIANTS, printCropBags, printPigeonKit, sittingPigeonCard } from "./pieces/pigeon";
@@ -49,6 +50,7 @@ import { BOX_ROW_DECK_Z, BOX_SPACING_UNITS, boxAlong } from "./replay/perches";
 import { loadRecordedRound } from "./replay/recorded-rounds";
 import { buildReplayScene } from "./replay/replay-scene";
 import { recordFrameTimes } from "./stage/frame-recorder";
+import { buildParkLife } from "./stage/park-life";
 import { printParkGround } from "./stage/park-ground";
 import { probeQualityTier, storedRenderScale } from "./stage/quality-probe";
 import { PAPER_STOCK, PARK_LENS, PARK_LIGHT, PARK_TEST_VIEW, PARK_VIEW, TABLE_YAW_RAD, TEST_CARD_SPOT } from "./stage/look";
@@ -101,6 +103,8 @@ function buildPark(harness: Harness, mode: SceneMode): void {
   const [flukeX, flukeZ] = placeOnTable([13.5, backBenchAcross - 3.6]);
   buildWhaleFluke(harness, flukeX, flukeZ);
   buildParkDressing(harness);
+  buildLawnFillers(harness);
+  buildParkLife(harness);
 
   if (mode.kind === "replay") {
     buildReplayScene(harness, picnicTable, whaleModel, boxes, mode.round);

@@ -118,6 +118,20 @@ export function sittingPigeonCard(): [Point[], PaintFn] {
   return [outline, paint];
 }
 
+const AMBIENT_PALE_SHARE = 0.32;
+
+export function ambientPigeonCard(): [Point[], PaintFn] {
+  const [outline, paintParts] = P2.drawnPiece(
+    (context, ink) => drawSittingPigeon(context, (color, how) => ink(P2.mix(color, PALETTE.creamCore, AMBIENT_PALE_SHARE), how)),
+    { w: 5.0, h: 3.5, name: "park pigeon" },
+  );
+  const paint: PaintFn = (print) => {
+    paintParts(print);
+    print.felt(0.7);
+  };
+  return [outline, paint];
+}
+
 export const PIGEON_VARIANTS = ["gary", "linda", "doug", "brenda", "keith", "sheila"] as const;
 export type PigeonVariant = (typeof PIGEON_VARIANTS)[number];
 
