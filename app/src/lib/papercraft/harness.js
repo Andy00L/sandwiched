@@ -8,7 +8,8 @@
 // review captures), ?size=1080x1920 (render exactly that many pixels, scaled to fit the window: a video or still
 // format), ?aspect=9:16 (the largest frame of that shape in the window), ?res=1.5 (print resolution, default from the
 // frame), ?closer=1.3 (a frame taller than wide comes closer), ?safe=all|meta|tiktok|shorts (outline a vertical
-// platform's UI-safe area and its feed crops over the frame).
+// platform's UI-safe area and its feed crops over the frame), ?scale=0.75 (draw that fraction of the window's pixels and
+// let the browser upscale: a quality tier for a GPU that cannot fill the frame; createHarness({ renderScale }) sets it).
 // Formats, safe areas and what scales with them: references/formats.md.
 // In your own project: copy assets/lib/ (and assets/examples/ only if you import one) and this file, keep it as it is,
 // and map "papercraft/" in your page's import map to the folder that holds lib/ (the template's index.html maps it to ../../).
@@ -66,7 +67,7 @@ export const MOODS = {
  */
 export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, ground = '#d9d2c2', view: view0 = {}, testView = { dist: 38, target: [3, 1.5, -6] },
   heroHeight = 3.6, light = {}, lens = {}, walk: walkOpts = { step: 0.75, radius: 0.6 }, moods = MOODS, play = false, focus = null, mood = null, stock = '#f7f0e2', walkArea = null, camBox = null,
-  size = null, aspect = null, subject = null, rotate = false } = {}) {
+  size = null, aspect = null, subject = null, rotate = false, renderScale = 1 } = {}) {
   const T0 = performance.now();
   // print costs by the scene line that asked for them: __papercraft.printStats() (and a console line when the build is
   // slow) says which pieces to print smaller (popup res), share (one print, many cards) or cut
@@ -108,12 +109,14 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
   // window. ?ss=2 supersamples (renders at 2x and lets the browser downsample): review captures at the shipped frames'
   // edge smoothness; the live view on a retina screen gets the same from its pixel ratio.
   const SS = Math.max(1, Number(Q.get('ss')) || 1);
+  const clampScale = (scale) => Math.min(1, Math.max(0.4, scale));
+  let renderScaleNow = clampScale(Number(Q.get('scale')) || renderScale);
   const pair = (s, re) => { const m = re.exec(String(s ?? '')); return m ? [Number(m[1]), Number(m[2])] : null; };
   const SIZE = pair(Q.get('size'), /^(\d+)x(\d+)$/i) || size;
   const ASPECT = (() => { const p = pair(Q.get('aspect') ?? aspect, /^([\d.]+)\s*[:x/]\s*([\d.]+)$/i); return p ? p[0] / p[1] : typeof aspect === 'number' ? aspect : null; })();
   function frameBox() {   // drawing size (CSS px; times pr = device px), its size on screen (cw x ch) and pixel ratio
     if (SIZE) { const k = Math.min(1, innerWidth / SIZE[0], innerHeight / SIZE[1]); return { w: SIZE[0], h: SIZE[1], cw: SIZE[0] * k, ch: SIZE[1] * k, pr: SS }; }
-    const pr = Math.min(3, Math.min(devicePixelRatio, 2) * SS);
+    const pr = Math.min(3, Math.min(devicePixelRatio, 2) * SS * renderScaleNow);
     if (ASPECT) { const cw = Math.min(innerWidth, innerHeight * ASPECT), ch = cw / ASPECT; return { w: Math.round(cw), h: Math.round(ch), cw, ch, pr }; }
     return { w: innerWidth, h: innerHeight, cw: innerWidth, ch: innerHeight, pr };
   }
@@ -452,7 +455,7 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
   const glowing = (group) => { glowers.push(group); group.traverse((o) => o.userData.setGlow?.(0.35)); };
 
   const H = { THREE, P2, flags, renderer, scene, camera, paper, view, target, walk, hinges, spots, bounds, frame, heroHeight, groundAt, stack, dome,
-    printGround, popup, printed, cardOpts, inFrame, inReach, walkArea, sharpAt, lamp, glowing, hero: null, heroStride: null, stepHooks: [], onStep: (fn) => H.stepHooks.push(fn), restartHooks: [], onRestart: (fn) => H.restartHooks.push(fn), heroTurn: 'yaw', setHero: (h, { stride = null, turn = 'yaw' } = {}) => { H.hero = h; H.heroStride = stride; H.heroTurn = turn; }, start };
+    printGround, popup, printed, cardOpts, inFrame, inReach, walkArea, sharpAt, lamp, glowing, hero: null, heroStride: null, stepHooks: [], onStep: (fn) => H.stepHooks.push(fn), restartHooks: [], onRestart: (fn) => H.restartHooks.push(fn), heroTurn: 'yaw', setHero: (h, { stride = null, turn = 'yaw' } = {}) => { H.hero = h; H.heroStride = stride; H.heroTurn = turn; }, start, setRenderScale: (scale) => { renderScaleNow = clampScale(scale); } };
 
   // ---- start: light, lens, choreography, input, walking, the loop and the capture hook -------------------------------
   function start() {
@@ -743,6 +746,7 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
       drawSafe(b);
     }
     addEventListener('resize', resize);
+    H.setRenderScale = (scale) => { renderScaleNow = clampScale(scale); resize(); };   // a quality tier chosen after start
     resize();
     setOpen(true);
     heroPos.set(hero.group.position.x, 0, hero.group.position.z); HERO0.copy(heroPos); heading = heading0 = hero.group.rotation.y;

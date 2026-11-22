@@ -46,6 +46,7 @@ import { loadRecordedRound } from "./replay/recorded-rounds";
 import { buildReplayScene } from "./replay/replay-scene";
 import { recordFrameTimes } from "./stage/frame-recorder";
 import { printParkGround } from "./stage/park-ground";
+import { probeQualityTier, storedRenderScale } from "./stage/quality-probe";
 import { PAPER_STOCK, PARK_LENS, PARK_LIGHT, PARK_TEST_VIEW, PARK_VIEW, TABLE_YAW_RAD, TEST_CARD_SPOT } from "./stage/look";
 
 type SceneMode = { kind: "sample" } | { kind: "replay"; round: RecordedRound };
@@ -127,11 +128,13 @@ export async function buildTableScene(): Promise<void> {
     light: PARK_LIGHT,
     lens: PARK_LENS,
     focus: [1.5, 8, -7],
+    renderScale: storedRenderScale(),
   });
   harness.printGround((tools) => printParkGround(tools, harness.bounds));
   if (harness.flags.TEST) buildTestCards(harness);
   else buildPark(harness, mode);
   harness.start();
+  probeQualityTier(harness);
   holdAtRequestedTime();
   reportFrameTimesWhenAsked();
 }

@@ -77,6 +77,7 @@ export interface HarnessOptions {
   mood?: string | null;
   stock?: string;
   subject?: Point | Vector3Tuple | null;
+  renderScale?: number;
 }
 
 export interface GroundTools {
@@ -143,6 +144,7 @@ export interface Harness {
   onRestart(hook: () => void): void;
   setHero(handle: PlacedPiece, options?: { turn?: "yaw" | "flip" }): void;
   start(): void;
+  setRenderScale(scale: number): void;
 }
 
 export function createHarness(options?: HarnessOptions): Harness;
