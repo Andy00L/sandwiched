@@ -20,7 +20,6 @@ import {
   type TransactionSigner,
   confirmOnBase,
   readTokenAccountUnits,
-  readTokenUnits,
   resolveFeePayer,
   sendOnBase,
   sendOnRollup,
@@ -30,7 +29,7 @@ import {
 const DEPOSIT_KEY_PREFIX = "sandwich.deposit.v2.";
 const DEPOSIT_LANDING_TIMEOUT_MS = 10_000;
 const SHUTTLE_VISIBLE_TIMEOUT_MS = 30_000;
-const BALANCE_POLL_MS = 250;
+const SHUTTLE_POLL_MS = 250;
 const UNSEEN_ON_BASE_GRACE_MS = 120_000;
 
 type DepositBase = { shuttleId: number; units: bigint; createdAtMs: number };
@@ -51,7 +50,6 @@ export type ShuttleSighting = "absent" | "funded" | "emptied";
 export type BaseShuttle = { kind: "missing" } | { kind: "delegated" } | { kind: "undelegated" } | { kind: "foreign"; owner: string };
 
 export type DepositChain = {
-  readOwnerUnits: () => Promise<Result<bigint>>;
   readShuttle: (shuttleId: number) => Promise<Result<ShuttleSighting>>;
   readBaseShuttle: (shuttleId: number) => Promise<Result<BaseShuttle>>;
   submitDeposit: (units: bigint, shuttleId: number) => Promise<Result<BaseSubmission>>;
@@ -79,7 +77,6 @@ export const createDepositChain = ({ client, owner, mint, validator }: DepositCh
     return { ephemeralAta, record, walletAta: deriveShuttleWalletAta(mint, ephemeralAta) };
   };
   return {
-    readOwnerUnits: () => readTokenUnits(client.rollup, ownerToken),
     readShuttle: async (shuttleId) => {
       const units = await readTokenAccountUnits(client.rollup, deriveShuttle(shuttleId).walletAta);
       if (!units.ok) return units;
@@ -188,25 +185,29 @@ export const createDepositQueue = ({ chain, owner, store, readNowMs = Date.now }
     return run;
   };
 
-  const waitForLanding = (shuttleId: number, units: bigint, unitsBefore: bigint) => {
-    let hasSeenShuttleFunded = false;
+  const waitForLanding = (shuttleId: number) => {
+    let hasSeenInFlight = false;
     return pollUntil(
       "deposit on the rollup",
       async () => {
-        const [ownerUnits, shuttle] = await Promise.all([chain.readOwnerUnits(), chain.readShuttle(shuttleId)]);
-        if (shuttle.ok && shuttle.value === "emptied") return true;
-        if (shuttle.ok && shuttle.value === "absent" && hasSeenShuttleFunded) return true;
-        if (shuttle.ok && shuttle.value === "funded") hasSeenShuttleFunded = true;
-        return ownerUnits.ok && ownerUnits.value >= unitsBefore + units ? true : null;
+        const shuttle = await chain.readShuttle(shuttleId);
+        if (!shuttle.ok) return null;
+        if (shuttle.value === "emptied") return true;
+        if (shuttle.value === "funded") {
+          hasSeenInFlight = true;
+          return null;
+        }
+        const base = await chain.readBaseShuttle(shuttleId);
+        if (!base.ok) return null;
+        if (base.value.kind === "delegated") hasSeenInFlight = true;
+        return base.value.kind === "missing" && hasSeenInFlight ? true : null;
       },
       DEPOSIT_LANDING_TIMEOUT_MS,
-      BALANCE_POLL_MS,
+      SHUTTLE_POLL_MS,
     );
   };
 
   const runDeposit = async (units: bigint): Promise<Result<DepositOutcome>> => {
-    const before = await chain.readOwnerUnits();
-    if (!before.ok) return failure(`[runDeposit] rollup balance: ${before.reason}`);
     const createdAtMs = readNowMs();
     const intent = ledger.recordIntent(drawShuttleId(), units, createdAtMs);
     if (!intent.ok) return failure(`[runDeposit] nothing was sent, the deposit cannot be recorded first: ${intent.reason}`);
@@ -221,7 +222,7 @@ export const createDepositQueue = ({ chain, owner, store, readNowMs = Date.now }
       reportLedgerFailure(ledger.settle(current));
       return failure(`[runDeposit] the deposit failed on base and moved nothing: ${confirmed.reason}`);
     }
-    const landed = await waitForLanding(intent.value.shuttleId, units, before.value);
+    const landed = await waitForLanding(intent.value.shuttleId);
     if (!landed.ok) {
       reportLedgerFailure(ledger.markStranded(current, landed.reason));
       return success({ state: "pending", signature, shuttleId: intent.value.shuttleId });
@@ -271,7 +272,7 @@ export const createDepositQueue = ({ chain, owner, store, readNowMs = Date.now }
             return sighting.ok && sighting.value === "funded" ? true : null;
           },
           SHUTTLE_VISIBLE_TIMEOUT_MS,
-          BALANCE_POLL_MS,
+          SHUTTLE_POLL_MS,
         );
         return visible.ok ? mergeShuttle(record) : keepWaiting(record, visible.reason);
       }

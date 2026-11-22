@@ -12,21 +12,19 @@ const TWO_MINUTES_MS = 120_000;
 const OWNER = Keypair.generate().publicKey;
 
 type FakeChainScript = {
-  ownerUnits?: (readIndex: number) => bigint;
   shuttle?: (readIndex: number) => ShuttleSighting;
-  baseShuttle?: BaseShuttle;
+  baseShuttle?: (readIndex: number) => BaseShuttle;
   confirmation?: BaseConfirmation;
   onSubmit?: () => void;
 };
 
 const createFakeDepositChain = (script: FakeChainScript = {}) => {
-  let ownerReads = 0;
   let shuttleReads = 0;
+  let baseReads = 0;
   const calls = { submits: 0, merges: 0, redelegates: 0 };
   const chain: DepositChain = {
-    readOwnerUnits: async () => ({ ok: true, value: script.ownerUnits?.(ownerReads++) ?? 0n }),
     readShuttle: async () => ({ ok: true, value: script.shuttle?.(shuttleReads++) ?? "absent" }),
-    readBaseShuttle: async () => ({ ok: true, value: script.baseShuttle ?? { kind: "missing" } }),
+    readBaseShuttle: async () => ({ ok: true, value: script.baseShuttle?.(baseReads++) ?? { kind: "missing" } }),
     submitDeposit: async () => {
       calls.submits += 1;
       script.onSubmit?.();
@@ -90,30 +88,46 @@ describe("createDepositQueue deposit", () => {
     expect(queue.listPending()).toEqual([]);
   });
 
-  test("does not count a buy-in during the landing window as the deposit landing", async () => {
+  test("keeps a deposit whose shuttle stays funded on the rollup as stranded", async () => {
     const store = createMemoryKeyStore();
-    const { chain } = createFakeDepositChain({ ownerUnits: (readIndex) => (readIndex === 0 ? 5_000n : 4_000n), shuttle: () => "funded" });
+    const { chain } = createFakeDepositChain({ shuttle: () => "funded" });
     const queue = createDepositQueue({ chain, owner: OWNER, store });
     const outcome = await settleWithFakeTime(queue.deposit(DEPOSIT_UNITS));
     expect(readState(outcome)).toBe("pending");
     expect(queue.listPending()).toMatchObject([{ state: "stranded" }]);
   });
 
-  test("lands when the shuttle empties, even though a buy-in lowered the balance meanwhile", async () => {
+  test("lands when the shuttle empties", async () => {
     const store = createMemoryKeyStore();
-    const { chain } = createFakeDepositChain({
-      ownerUnits: (readIndex) => (readIndex === 0 ? 5_000n : 4_500n),
-      shuttle: (readIndex) => (readIndex < 2 ? "funded" : "emptied"),
-    });
+    const { chain } = createFakeDepositChain({ shuttle: (readIndex) => (readIndex < 2 ? "funded" : "emptied") });
     const queue = createDepositQueue({ chain, owner: OWNER, store });
     expect(readState(await settleWithFakeTime(queue.deposit(DEPOSIT_UNITS)))).toBe("landed");
     expect(queue.listPending()).toEqual([]);
   });
 
-  test("lands when the balance rose by the deposited units", async () => {
+  test("lands when the shuttle closes on base after it was seen delegated", async () => {
     const store = createMemoryKeyStore();
-    const { chain } = createFakeDepositChain({ ownerUnits: (readIndex) => (readIndex < 2 ? 5_000n : 6_000n) });
+    const { chain } = createFakeDepositChain({ baseShuttle: (readIndex) => (readIndex < 2 ? { kind: "delegated" } : { kind: "missing" }) });
     expect(readState(await settleWithFakeTime(createDepositQueue({ chain, owner: OWNER, store }).deposit(DEPOSIT_UNITS)))).toBe("landed");
+  });
+
+  test("does not count a shuttle missing on base as landed before it was ever seen in flight", async () => {
+    const store = createMemoryKeyStore();
+    const { chain } = createFakeDepositChain();
+    const queue = createDepositQueue({ chain, owner: OWNER, store });
+    expect(readState(await settleWithFakeTime(queue.deposit(DEPOSIT_UNITS)))).toBe("pending");
+    expect(queue.listPending()).toMatchObject([{ state: "stranded" }]);
+  });
+
+  test("does not count a shuttle handed back to base unmerged as landed", async () => {
+    const store = createMemoryKeyStore();
+    const { chain } = createFakeDepositChain({
+      shuttle: (readIndex) => (readIndex < 2 ? "funded" : "absent"),
+      baseShuttle: () => ({ kind: "undelegated" }),
+    });
+    const queue = createDepositQueue({ chain, owner: OWNER, store });
+    expect(readState(await settleWithFakeTime(queue.deposit(DEPOSIT_UNITS)))).toBe("pending");
+    expect(queue.listPending()).toMatchObject([{ state: "stranded" }]);
   });
 
   test("two tabs depositing at once keep both records", async () => {
@@ -135,7 +149,7 @@ describe("createDepositQueue recoverPending", () => {
     const store = createMemoryKeyStore();
     const nowMs = { value: 1_000 };
     await strandOneDeposit(store, nowMs);
-    const { chain } = createFakeDepositChain({ baseShuttle: { kind: "missing" } });
+    const { chain } = createFakeDepositChain({ baseShuttle: () => ({ kind: "missing" }) });
     const queue = createDepositQueue({ chain, owner: OWNER, store, readNowMs: () => nowMs.value });
     expect(await queue.recoverPending()).toMatchObject([{ state: "waiting" }]);
     expect(queue.listPending()).toHaveLength(1);
@@ -157,7 +171,7 @@ describe("createDepositQueue recoverPending", () => {
   test("redelegates a shuttle that came back to base, then merges it once the rollup shows it", async () => {
     const store = createMemoryKeyStore();
     await strandOneDeposit(store, { value: 1_000 });
-    const { chain, calls } = createFakeDepositChain({ baseShuttle: { kind: "undelegated" }, shuttle: (readIndex) => (readIndex < 2 ? "absent" : "funded") });
+    const { chain, calls } = createFakeDepositChain({ baseShuttle: () => ({ kind: "undelegated" }), shuttle: (readIndex) => (readIndex < 2 ? "absent" : "funded") });
     const queue = createDepositQueue({ chain, owner: OWNER, store });
     expect(await settleWithFakeTime(queue.recoverPending(), 2_000)).toMatchObject([{ state: "merged" }]);
     expect(calls.redelegates).toBe(1);
