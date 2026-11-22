@@ -21,6 +21,7 @@ frames (a check, never a deliverable).
 Shots (default: overview):
     overview              restart(); step(3.2): the opening frame, risen
     midrise               restart(); step(0.8): mid-rise
+    time=SECONDS          restart(); step(SECONDS): the frame at that moment on the fixed clock (replays, the slam)
     test                  the ?test page (close, your test cards)
     key                   ?diag=key: the key light alone (shadow shapes)
     mood=NAME             ?mood=NAME (golden, dusk, night or one of yours), risen
@@ -83,6 +84,7 @@ def plan(shot):
     base = 'restart(); step(3.2);'
     if key == 'overview': return name or 'overview', '', base, 'frame'
     if key == 'midrise': return name or 'midrise', '', 'restart(); step(0.8);', 'frame'
+    if key == 'time': return name or f'time-{arg}', '', f'restart(); step({float(arg)});', 'frame'
     if key == 'test': return name or 'test', 'test', 'restart(); step(2.5);', 'frame'
     if key == 'key': return name or 'key', 'diag=key', base, 'frame'
     if key == 'mood': return name or f'mood-{arg}', f'mood={arg}', base, 'frame'

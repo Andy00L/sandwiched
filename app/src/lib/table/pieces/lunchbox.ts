@@ -1,4 +1,4 @@
-import type * as THREE from "three";
+import * as THREE from "three";
 import type { Harness } from "papercraft/harness.js";
 import * as P2 from "papercraft/lib/paperkit-2d.js";
 import type { PaintFn, Point, Print } from "papercraft/lib/paperkit-2d.js";
@@ -10,7 +10,7 @@ export const LUNCHBOX_WIDTH_UNITS = 1.6 * PIGEON_HEIGHT_UNITS;
 export const LUNCHBOX_DEPTH_UNITS = 1.1 * PIGEON_HEIGHT_UNITS;
 export const LUNCHBOX_HEIGHT_UNITS = 0.9 * PIGEON_HEIGHT_UNITS;
 
-export type LunchboxPattern = "stripes" | "dots" | "check";
+type LunchboxPattern = "stripes" | "dots" | "check";
 
 interface LunchboxLook {
   base: string;
@@ -24,7 +24,7 @@ export const LUNCHBOX_LOOKS = [
   { base: PALETTE.teal, motif: PALETTE.creamCore, pattern: "check" },
 ] as const satisfies readonly LunchboxLook[];
 
-export type LunchboxIndex = 0 | 1 | 2;
+const LID_OPEN_RAD = Math.PI / 2 + 0.35;
 
 function printCorrugation(print: Print, color: string): void {
   const { box } = print;
@@ -162,8 +162,12 @@ function paintHandle(print: Print): void {
   print.felt(0.6);
 }
 
-export function buildLunchbox(harness: Harness, lookIndex: LunchboxIndex, deck: THREE.Object3D, along: number, acrossDeck: number, order: number): THREE.Group {
-  const look: LunchboxLook = LUNCHBOX_LOOKS[lookIndex];
+export interface LunchboxModel {
+  node: THREE.Group;
+  setLidOpen(openAmount: number): void;
+}
+
+export function buildLunchbox(harness: Harness, look: LunchboxLook, boxIndex: number, deck: THREE.Object3D, along: number, acrossDeck: number, order: number): LunchboxModel {
   const halfWidth = LUNCHBOX_WIDTH_UNITS / 2;
   const footprint: Point[] = [
     [-halfWidth, 0],
@@ -176,12 +180,30 @@ export function buildLunchbox(harness: Harness, lookIndex: LunchboxIndex, deck: 
     h: LUNCHBOX_HEIGHT_UNITS,
     roof: "flat",
     paper: harness.paper,
-    seed: 500 + lookIndex * 17,
-    paints: { wall: [paintWall(look, true), paintWall(look, false), paintWall(look, false), paintWall(look, false)], roof: paintLid(look) },
+    seed: 500 + boxIndex * 17,
+    paints: { wall: [paintWall(look, false), paintWall(look, false), paintWall(look, true), paintWall(look, false)], roof: paintLid(look) },
     print: { pxPerUnit: options.pxPerUnit, effects: options.effects },
   });
-  harness.popup(null, null, { node: box, height: LUNCHBOX_HEIGHT_UNITS, parent: deck, x: along, z: acrossDeck, yaw: 0, order });
-  const lidTop = box.userData.top as THREE.Object3D | undefined;
-  if (lidTop) harness.popup(handleOutline(), paintHandle, { parent: lidTop, x: 0, z: 0.2, yaw: 0, order: order + 0.6, scale: 1 });
-  return box;
+  const lidTop = box.userData.top;
+  const lid = lidTop.parent;
+  const followFold = box.userData.follow;
+  const node = new THREE.Group();
+  box.rotation.y = Math.PI;
+  node.add(box);
+  let closedLidAngle = lid.rotation.x;
+  let lidOpenAmount = 0;
+  node.userData.follow = (progress: number) => {
+    followFold(progress);
+    closedLidAngle = lid.rotation.x;
+    lid.rotation.x = closedLidAngle + LID_OPEN_RAD * lidOpenAmount;
+  };
+  harness.popup(null, null, { node, height: LUNCHBOX_HEIGHT_UNITS, parent: deck, x: along, z: acrossDeck - LUNCHBOX_DEPTH_UNITS, yaw: 0, order });
+  harness.popup(handleOutline(), paintHandle, { parent: lidTop, x: 0, z: -0.2, yaw: Math.PI, order: order + 0.6, scale: 1 });
+  return {
+    node,
+    setLidOpen(openAmount) {
+      lidOpenAmount = openAmount;
+      lid.rotation.x = closedLidAngle + LID_OPEN_RAD * openAmount;
+    },
+  };
 }

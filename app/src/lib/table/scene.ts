@@ -32,17 +32,23 @@ QA         plan/06 section 9: F0 to F13 captured with restart(); step(T).
 */
 import { createHarness } from "papercraft/harness.js";
 import type { Harness } from "papercraft/harness.js";
+import type { RecordedRound } from "../game/round-events";
 import { GROUND_INKS } from "./palette";
-import { TABLE_DEPTH_UNITS, placeOnTable } from "./layout";
-import { buildLunchbox, LUNCHBOX_WIDTH_UNITS } from "./pieces/lunchbox";
-import { buildLunchClutter } from "./pieces/lunch";
+import { placeOnTable } from "./layout";
+import { buildLunchbox, LUNCHBOX_LOOKS } from "./pieces/lunchbox";
+import { buildCrumbScatter, buildLunchClutter } from "./pieces/lunch";
 import { buildFlowerBed, buildHedge, buildLampPost, buildLitterBin, buildParkBench, buildParkSign, buildPlaneTree } from "./pieces/park";
 import { sittingPigeonCard, standingPigeonCard } from "./pieces/pigeon";
 import { buildPicnicTable } from "./pieces/table";
 import { buildWhale, buildWhaleFluke } from "./pieces/whale";
+import { BOX_ROW_DECK_Z, BOX_SPACING_UNITS, boxAlong } from "./replay/perches";
+import { loadRecordedRound } from "./replay/recorded-rounds";
+import { buildReplayScene } from "./replay/replay-scene";
 import { recordFrameTimes } from "./stage/frame-recorder";
 import { printParkGround } from "./stage/park-ground";
 import { PAPER_STOCK, PARK_LENS, PARK_LIGHT, PARK_TEST_VIEW, PARK_VIEW, TABLE_YAW_RAD, TEST_CARD_SPOT } from "./stage/look";
+
+type SceneMode = { kind: "sample" } | { kind: "replay"; round: RecordedRound };
 
 function buildTestCards(harness: Harness): void {
   const [outline, paint] = sittingPigeonCard();
@@ -51,30 +57,7 @@ function buildTestCards(harness: Harness): void {
   harness.setHero(pigeon);
 }
 
-const BOX_SPACING_UNITS = LUNCHBOX_WIDTH_UNITS + 4.4;
-const BOX_ROW_DECK_Z = -TABLE_DEPTH_UNITS * 0.36;
-
-function buildPaletteSample(harness: Harness): void {
-  const { table, deck, backBenchAcross } = buildPicnicTable(harness);
-  const boxOrder = table.order + 0.6;
-  for (const [lookIndex, along] of [
-    [0, -BOX_SPACING_UNITS],
-    [1, 0],
-    [2, BOX_SPACING_UNITS],
-  ] as const) {
-    buildLunchbox(harness, lookIndex, deck, along, BOX_ROW_DECK_Z, boxOrder + lookIndex * 0.15);
-  }
-  const pigeonYaw = -TABLE_YAW_RAD;
-  harness.popup(...standingPigeonCard("gary", "left"), { parent: deck, x: 5.3, z: BOX_ROW_DECK_Z + 0.4, yaw: pigeonYaw, order: boxOrder + 0.8 });
-  harness.popup(...standingPigeonCard("linda", "right"), { parent: deck, x: -BOX_SPACING_UNITS + 5.2, z: BOX_ROW_DECK_Z - 0.6, yaw: pigeonYaw, order: boxOrder + 0.9 });
-
-  buildLunchClutter(harness, deck, 3.6, BOX_ROW_DECK_Z + 1.4, boxOrder + 1.0);
-
-  const [whaleX, whaleZ] = placeOnTable([3.2, backBenchAcross - 1.6]);
-  const { whale } = buildWhale(harness, whaleX, whaleZ, TABLE_YAW_RAD * 0.45);
-  const [flukeX, flukeZ] = placeOnTable([13.5, backBenchAcross - 3.6]);
-  buildWhaleFluke(harness, flukeX, flukeZ);
-
+function buildParkDressing(harness: Harness): void {
   const [signX, signZ] = placeOnTable([-21, -5]);
   buildParkSign(harness, signX, signZ);
   const [binX, binZ] = placeOnTable([21.5, 3.5]);
@@ -97,10 +80,45 @@ function buildPaletteSample(harness: Harness): void {
   buildLampPost(harness, 25, -16);
   buildParkBench(harness, 33, -20);
   buildFlowerBed(harness, 36, 9, 83);
-  harness.setHero(whale);
 }
 
-export function buildTableScene(): void {
+function buildPark(harness: Harness, mode: SceneMode): void {
+  const picnicTable = buildPicnicTable(harness);
+  const { table, deck, backBenchAcross } = picnicTable;
+  const boxOrder = table.order + 0.6;
+  const boxes = LUNCHBOX_LOOKS.map((look, boxIndex) =>
+    buildLunchbox(harness, look, boxIndex, deck, boxAlong(boxIndex, LUNCHBOX_LOOKS.length), BOX_ROW_DECK_Z, boxOrder + boxIndex * 0.15),
+  );
+  buildLunchClutter(harness, deck, boxOrder + 1.0);
+
+  const [whaleX, whaleZ] = placeOnTable([3.2, backBenchAcross - 1.6]);
+  const whaleModel = buildWhale(harness, whaleX, whaleZ, TABLE_YAW_RAD * 0.45);
+  const [flukeX, flukeZ] = placeOnTable([13.5, backBenchAcross - 3.6]);
+  buildWhaleFluke(harness, flukeX, flukeZ);
+  buildParkDressing(harness);
+
+  if (mode.kind === "replay") {
+    buildReplayScene(harness, picnicTable, whaleModel, boxes, mode.round);
+  } else {
+    const pigeonYaw = -TABLE_YAW_RAD;
+    harness.popup(...standingPigeonCard("gary", "left"), { parent: deck, x: 5.3, z: BOX_ROW_DECK_Z + 0.4, yaw: pigeonYaw, order: boxOrder + 0.8 });
+    harness.popup(...standingPigeonCard("linda", "right"), { parent: deck, x: -BOX_SPACING_UNITS + 5.2, z: BOX_ROW_DECK_Z - 0.6, yaw: pigeonYaw, order: boxOrder + 0.9 });
+    buildCrumbScatter(harness, deck, 3.6, BOX_ROW_DECK_Z + 1.4, boxOrder + 1.2);
+  }
+  harness.setHero(whaleModel.whale);
+}
+
+async function readSceneMode(): Promise<SceneMode> {
+  const replayName = new URLSearchParams(location.search).get("replay");
+  if (!replayName) return { kind: "sample" };
+  const loaded = await loadRecordedRound(replayName);
+  if (loaded.ok) return { kind: "replay", round: loaded.round };
+  console.warn(`[readSceneMode] ${loaded.reason}`);
+  return { kind: "sample" };
+}
+
+export async function buildTableScene(): Promise<void> {
+  const mode = await readSceneMode();
   const harness = createHarness({
     ground: GROUND_INKS.lawn,
     stock: PAPER_STOCK,
@@ -112,9 +130,17 @@ export function buildTableScene(): void {
   });
   harness.printGround((tools) => printParkGround(tools, harness.bounds));
   if (harness.flags.TEST) buildTestCards(harness);
-  else buildPaletteSample(harness);
+  else buildPark(harness, mode);
   harness.start();
+  holdAtRequestedTime();
   reportFrameTimesWhenAsked();
+}
+
+function holdAtRequestedTime(): void {
+  const requestedSeconds = Number(new URLSearchParams(location.search).get("t"));
+  if (!(requestedSeconds > 0)) return;
+  window.__papercraft?.restart();
+  window.__papercraft?.step(requestedSeconds);
 }
 
 const FRAME_RECORDER_WARMUP_MS = 1500;

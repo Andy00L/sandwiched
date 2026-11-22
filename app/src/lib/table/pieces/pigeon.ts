@@ -8,6 +8,7 @@ const PIGEON_BELLY = "#c8cdd4";
 const PIGEON_TAIL = "#4f5765";
 const PIGEON_BAR = "#3f4654";
 const FEATHER_COUNT = 3;
+const KRAFT_CAP = "#8a6649";
 
 function eggOutline(centreX: number, centreY: number, radiusX: number, radiusY: number, taperBack: number, steps = 48): Point[] {
   return [...Array(steps).keys()].map((step) => {
@@ -114,20 +115,48 @@ export function sittingPigeonCard(): [Point[], PaintFn] {
   return [outline, paint];
 }
 
-export type PigeonVariant = "gary" | "linda";
-export type PigeonFacing = "left" | "right";
+export const PIGEON_VARIANTS = ["gary", "linda", "doug", "brenda", "keith", "sheila"] as const;
+export type PigeonVariant = (typeof PIGEON_VARIANTS)[number];
+type PigeonFacing = "left" | "right";
 
 interface StandingShape {
   bodyRadiusX: number;
   bodyRadiusY: number;
+  bellyScale: number;
   neckHeight: number;
   headRadius: number;
+  tailLift: number;
+  tailLength: number;
+  sheen: string;
 }
 
 const STANDING_SHAPES: Record<PigeonVariant, StandingShape> = {
-  gary: { bodyRadiusX: 1.45, bodyRadiusY: 1.1, neckHeight: 0.62, headRadius: 0.6 },
-  linda: { bodyRadiusX: 1.25, bodyRadiusY: 0.95, neckHeight: 1.05, headRadius: 0.5 },
+  gary: { bodyRadiusX: 1.45, bodyRadiusY: 1.1, bellyScale: 1, neckHeight: 0.62, headRadius: 0.6, tailLift: 0, tailLength: 1.45, sheen: PALETTE.teal },
+  linda: { bodyRadiusX: 1.25, bodyRadiusY: 0.95, bellyScale: 1, neckHeight: 1.05, headRadius: 0.5, tailLift: 0, tailLength: 1.45, sheen: PALETTE.plum },
+  doug: { bodyRadiusX: 1.6, bodyRadiusY: 1.0, bellyScale: 1, neckHeight: 0.6, headRadius: 0.58, tailLift: 0.75, tailLength: 1.3, sheen: PALETTE.teal },
+  brenda: { bodyRadiusX: 1.15, bodyRadiusY: 0.9, bellyScale: 0.9, neckHeight: 0.85, headRadius: 0.5, tailLift: -0.1, tailLength: 2.1, sheen: PALETTE.plum },
+  keith: { bodyRadiusX: 1.35, bodyRadiusY: 1.0, bellyScale: 1, neckHeight: 0.72, headRadius: 0.56, tailLift: 0.2, tailLength: 1.4, sheen: PALETTE.teal },
+  sheila: { bodyRadiusX: 1.4, bodyRadiusY: 1.12, bellyScale: 1.35, neckHeight: 0.66, headRadius: 0.55, tailLift: 0.1, tailLength: 1.35, sheen: PALETTE.plum },
 };
+
+interface PigeonAnchors {
+  bodyY: number;
+  neckX: number;
+  neckY: number;
+  headX: number;
+  headY: number;
+  eyeX: number;
+  eyeY: number;
+}
+
+function pigeonAnchors(shape: StandingShape): PigeonAnchors {
+  const bodyY = 1.0 + shape.bodyRadiusY * 0.82;
+  const neckX = 0.85;
+  const neckY = bodyY + shape.bodyRadiusY * 0.7;
+  const headX = neckX + 0.22;
+  const headY = neckY + shape.neckHeight * 0.75 + shape.headRadius * 0.55;
+  return { bodyY, neckX, neckY, headX, headY, eyeX: headX + shape.headRadius * 0.28, eyeY: headY + shape.headRadius * 0.2 };
+}
 
 function drawLegs(context: CanvasRenderingContext2D, ink: Ink): void {
   context.fillStyle = ink(PALETTE.plum);
@@ -142,41 +171,43 @@ function drawLegs(context: CanvasRenderingContext2D, ink: Ink): void {
   }
 }
 
-function drawStandingPigeon(variant: PigeonVariant, context: CanvasRenderingContext2D, ink: Ink): void {
-  const shape = STANDING_SHAPES[variant];
-  const bodyY = 1.0 + shape.bodyRadiusY * 0.82;
-  const neckX = 0.85;
-  const neckY = bodyY + shape.bodyRadiusY * 0.7;
-  const headX = neckX + 0.22;
-  const headY = neckY + shape.neckHeight * 0.75 + shape.headRadius * 0.55;
-
-  drawLegs(context, ink);
+function drawTail(context: CanvasRenderingContext2D, ink: Ink, shape: StandingShape, bodyY: number): void {
+  const tipX = -0.8 - shape.tailLength;
+  const lift = shape.tailLift;
   context.fillStyle = ink(PIGEON_TAIL);
   fillPolygon(context, [
     [-0.8, bodyY + 0.15],
-    [-2.25, bodyY - 0.35],
-    [-2.32, bodyY - 0.7],
-    [-2.1, bodyY - 0.95],
+    [tipX + 0.05, bodyY - 0.35 + lift],
+    [tipX - 0.02, bodyY - 0.7 + lift],
+    [tipX + 0.2, bodyY - 0.95 + lift],
     [-0.8, bodyY - 0.45],
   ]);
+}
 
-  if (variant === "linda") {
-    context.fillStyle = ink(PALETTE.teal);
-    P2.draw2.rect(context, -1.55, bodyY + 0.15, 1.15, 1.05, 0.22);
-    context.fillStyle = ink(P2.shade(PALETTE.teal, -0.2));
-    P2.draw2.rect(context, -1.5, bodyY + 0.2, 1.05, 0.3, 0.12);
-  }
+function drawBackAccessory(variant: PigeonVariant, context: CanvasRenderingContext2D, ink: Ink, anchors: PigeonAnchors): void {
+  if (variant !== "linda") return;
+  context.fillStyle = ink(PALETTE.teal);
+  P2.draw2.rect(context, -1.55, anchors.bodyY + 0.15, 1.15, 1.05, 0.22);
+  context.fillStyle = ink(P2.shade(PALETTE.teal, -0.2));
+  P2.draw2.rect(context, -1.5, anchors.bodyY + 0.2, 1.05, 0.3, 0.12);
+}
 
+function drawBody(context: CanvasRenderingContext2D, ink: Ink, shape: StandingShape, anchors: PigeonAnchors): void {
+  const { bodyY, neckX, neckY } = anchors;
   context.fillStyle = ink(PALETTE.pigeonGrey);
   fillPolygon(context, eggOutline(0.05, bodyY, shape.bodyRadiusX, shape.bodyRadiusY, 0.3).map(([pointX, pointY]): Point => [pointX, Math.max(0.6, pointY)]));
   context.fillStyle = ink(PIGEON_BELLY);
-  fillPolygon(context, eggOutline(0.5, bodyY - 0.15, shape.bodyRadiusX * 0.55, shape.bodyRadiusY * 0.62, 0.1).map(([pointX, pointY]): Point => [pointX, Math.max(0.6, pointY)]));
-
+  fillPolygon(
+    context,
+    eggOutline(0.5, bodyY - 0.15, shape.bodyRadiusX * 0.55 * shape.bellyScale, shape.bodyRadiusY * 0.62 * shape.bellyScale, 0.1).map(([pointX, pointY]): Point => [pointX, Math.max(0.6, pointY)]),
+  );
   context.fillStyle = ink(PALETTE.pigeonGrey);
   P2.draw2.ell(context, neckX, neckY + shape.neckHeight * 0.35, 0.5, 0.45 + shape.neckHeight * 0.5, -0.3);
-  context.fillStyle = ink(variant === "gary" ? PALETTE.teal : PALETTE.plum);
+  context.fillStyle = ink(shape.sheen);
   P2.draw2.ell(context, neckX + 0.04, neckY + shape.neckHeight * 0.3, 0.48, 0.32 + shape.neckHeight * 0.32, -0.3);
+}
 
+function drawWing(variant: PigeonVariant, context: CanvasRenderingContext2D, ink: Ink, bodyY: number): void {
   context.fillStyle = ink(PIGEON_WING);
   fillPolygon(context, [
     [0.65, bodyY + 0.65],
@@ -209,7 +240,25 @@ function drawStandingPigeon(variant: PigeonVariant, context: CanvasRenderingCont
       [-0.12, bodyY - 0.2],
     ]);
   }
+  if (variant === "keith") {
+    context.fillStyle = ink(PIGEON_WING);
+    P2.draw2.ell(context, -0.9, bodyY + 0.95, 0.42, 0.14, 0.9);
+    P2.draw2.ell(context, -0.4, bodyY + 1.0, 0.36, 0.12, -0.7);
+    context.fillStyle = ink(PALETTE.creamCore);
+    P2.draw2.rect(context, 0.2, bodyY - 0.5, 0.5, 0.18, 0.05);
+    P2.draw2.rect(context, 0.36, bodyY - 0.66, 0.18, 0.5, 0.05);
+  }
+}
 
+function drawHead(variant: PigeonVariant, context: CanvasRenderingContext2D, ink: Ink, shape: StandingShape, anchors: PigeonAnchors): void {
+  const { headX, headY, eyeX, eyeY, neckX, neckY } = anchors;
+  if (variant === "brenda") {
+    context.fillStyle = ink(PALETTE.creamCore);
+    for (let pearl = 0; pearl < 5; pearl++) {
+      const angle = -0.9 + pearl * 0.42;
+      P2.draw2.ell(context, neckX + Math.cos(angle) * 0.42, neckY + 0.1 + Math.sin(angle) * 0.2, 0.1, 0.1);
+    }
+  }
   context.fillStyle = ink(PIGEON_HEAD);
   P2.draw2.ell(context, headX, headY, shape.headRadius + 0.04, shape.headRadius);
   const beakBaseX = headX + shape.headRadius * 0.82;
@@ -223,16 +272,12 @@ function drawStandingPigeon(variant: PigeonVariant, context: CanvasRenderingCont
   P2.draw2.ell(context, beakBaseX + 0.06, headY + 0.08, 0.13, 0.08, -0.2);
   context.fillStyle = ink(PALETTE.ink, "print");
   P2.draw2.ell(context, beakBaseX + 0.52, headY - 0.04, 0.09, 0.08);
-
-  const eyeX = headX + shape.headRadius * 0.28;
-  const eyeY = headY + shape.headRadius * 0.2;
   context.fillStyle = ink(PALETTE.mustard, "print");
   P2.draw2.ell(context, eyeX, eyeY, 0.21, 0.21);
   context.fillStyle = ink(PALETTE.ink, "print");
   P2.draw2.ell(context, eyeX + 0.03, eyeY, 0.13, 0.13);
   context.fillStyle = ink(PALETTE.creamCore, "print");
   P2.draw2.ell(context, eyeX - 0.02, eyeY + 0.06, 0.05, 0.05);
-
   if (variant === "gary") {
     context.fillStyle = ink(PALETTE.mustard);
     context.beginPath();
@@ -243,9 +288,49 @@ function drawStandingPigeon(variant: PigeonVariant, context: CanvasRenderingCont
     context.lineWidth = 0.05;
     context.beginPath();
     context.moveTo(eyeX - 0.2, eyeY - 0.3);
-    context.quadraticCurveTo(eyeX - 0.5, eyeY - 1.0, eyeX - 0.1, bodyY + 0.6);
+    context.quadraticCurveTo(eyeX - 0.5, eyeY - 1.0, eyeX - 0.1, anchors.bodyY + 0.6);
     context.stroke();
   }
+  if (variant === "doug") {
+    context.fillStyle = ink(KRAFT_CAP);
+    fillPolygon(context, [
+      [headX - shape.headRadius - 0.05, headY + shape.headRadius * 0.45],
+      [headX + shape.headRadius + 0.45, headY + shape.headRadius * 0.45],
+      [headX + shape.headRadius * 0.6, headY + shape.headRadius + 0.22],
+      [headX - shape.headRadius * 0.7, headY + shape.headRadius + 0.18],
+    ]);
+  }
+  if (variant === "keith") {
+    context.fillStyle = ink(PIGEON_HEAD);
+    P2.draw2.ell(context, headX - 0.2, headY + shape.headRadius + 0.1, 0.12, 0.3, -0.4);
+    P2.draw2.ell(context, headX + 0.08, headY + shape.headRadius + 0.14, 0.1, 0.26, 0.3);
+  }
+  if (variant === "sheila") {
+    context.fillStyle = ink(PALETTE.tomato);
+    fillPolygon(context, [
+      [headX - 0.1, headY + shape.headRadius + 0.05],
+      [headX - 0.62, headY + shape.headRadius + 0.32],
+      [headX - 0.58, headY + shape.headRadius - 0.18],
+    ]);
+    fillPolygon(context, [
+      [headX - 0.1, headY + shape.headRadius + 0.05],
+      [headX + 0.42, headY + shape.headRadius + 0.36],
+      [headX + 0.46, headY + shape.headRadius - 0.12],
+    ]);
+    context.fillStyle = ink(P2.shade(PALETTE.tomato, -0.25));
+    P2.draw2.ell(context, headX - 0.08, headY + shape.headRadius + 0.08, 0.13, 0.13);
+  }
+}
+
+function drawStandingPigeon(variant: PigeonVariant, context: CanvasRenderingContext2D, ink: Ink): void {
+  const shape = STANDING_SHAPES[variant];
+  const anchors = pigeonAnchors(shape);
+  drawLegs(context, ink);
+  drawTail(context, ink, shape, anchors.bodyY);
+  drawBackAccessory(variant, context, ink, anchors);
+  drawBody(context, ink, shape, anchors);
+  drawWing(variant, context, ink, anchors.bodyY);
+  drawHead(variant, context, ink, shape, anchors);
 }
 
 export function standingPigeonCard(variant: PigeonVariant, facing: PigeonFacing): [Point[], PaintFn] {
@@ -257,7 +342,7 @@ export function standingPigeonCard(variant: PigeonVariant, facing: PigeonFacing)
       drawStandingPigeon(variant, context, ink);
       context.restore();
     },
-    { w: 5.0, h: 4.0, name: `pigeon ${variant}` },
+    { w: 5.6, h: 4.3, name: `pigeon ${variant}` },
   );
   const paint: PaintFn = (print) => {
     paintParts(print);

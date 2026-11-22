@@ -15,6 +15,7 @@ export interface CardOptions {
   pxPerUnit?: number;
   seed?: number;
   back?: "kraft" | "mirror" | PaintFn | false;
+  backRes?: number;
   folds?: Array<"bottom" | "top" | "left" | "right">;
   rimLight?: Point;
   effects?: 0 | 1;
@@ -47,21 +48,28 @@ export function hinge(
   child: THREE.Object3D,
   options?: { at?: THREE.Vector3; yaw?: number; open?: number; size?: number; flat?: number; rest?: number; delay?: number },
 ): HingeHandle;
-export function prismFold(
-  footprint: Point[],
-  options: {
-    h?: number;
-    roof?: "flat" | "pyramid" | "none";
-    roofH?: number;
-    paper: PaperTextures;
-    seed?: number;
-    thickness?: number;
-    edgeWidth?: number;
-    paints?: { wall?: PaintFn | PaintFn[]; roof?: PaintFn | PaintFn[] };
-    rimLight?: Point;
-    print?: Partial<CardOptions>;
-  },
-): THREE.Group;
+export interface PrismFoldOptions {
+  h?: number;
+  roofH?: number;
+  paper: PaperTextures;
+  seed?: number;
+  thickness?: number;
+  edgeWidth?: number;
+  paints?: { wall?: PaintFn | PaintFn[]; roof?: PaintFn | PaintFn[] };
+  rimLight?: Point;
+  print?: Partial<CardOptions>;
+}
+
+export interface FoldedVolume extends THREE.Group {
+  userData: { follow(progress: number): void; footprint: Point[] };
+}
+
+export interface LiddedVolume extends THREE.Group {
+  userData: { follow(progress: number): void; footprint: Point[]; top: THREE.Group & { parent: THREE.Group } };
+}
+
+export function prismFold(footprint: Point[], options: PrismFoldOptions & { roof?: "flat" }): LiddedVolume;
+export function prismFold(footprint: Point[], options: PrismFoldOptions & { roof: "pyramid" | "none" }): FoldedVolume;
 export function platform(options: {
   w?: number;
   d?: number;
@@ -78,3 +86,20 @@ export function platform(options: {
   rimLight?: Point;
   print?: Partial<CardOptions>;
 }): THREE.Group;
+
+export class FlapSpring {
+  constructor(options?: { p?: number; size?: number; jitter?: number; quiverJitter?: number });
+  readonly atRest: boolean;
+  reset(open?: number): FlapSpring;
+  set(target: number): void;
+  step(dt: number): number;
+}
+
+export class Spring {
+  constructor(options?: { value?: number; hz?: number; zeta?: number });
+  target: number;
+  readonly settled: boolean;
+  reset(value?: number): Spring;
+  set(target: number): void;
+  step(dt: number): number;
+}

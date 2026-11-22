@@ -146,3 +146,15 @@ export interface Harness {
 }
 
 export function createHarness(options?: HarnessOptions): Harness;
+
+export interface PapercraftDebug {
+  ready: boolean;
+  step(seconds: number, fps?: number): number;
+  restart(): void;
+}
+
+declare global {
+  interface Window {
+    __papercraft?: PapercraftDebug;
+  }
+}
