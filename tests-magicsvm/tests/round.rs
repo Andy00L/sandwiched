@@ -24,7 +24,7 @@ use {
     sandwich::{
         accounts, instruction, Phase, SandwichError, Seat, StoredPigeonState, Table,
         CUSTODY_SEED, FAUCET_AUTHORITY_SEED, FAUCET_CLAIM_SEED, FAUCET_UNITS, SEAT_SEED,
-        TABLE_SEED, TEST_MINT_SEED, TICK_MS,
+        SETTLE_WINDOW_TICKS, TABLE_SEED, TEST_MINT_SEED, TICK_MS,
     },
     sandwich_rules::{constants::CHIPS_PER_ANTE, Timing},
     session_keys::SessionTokenV2,
@@ -54,8 +54,10 @@ const SWAT_WINDUP_TICKS: u64 = 35;
 const DRAW_TIMEOUT_TICKS: u64 = 500;
 const SESSION_VALIDITY_SECONDS: i64 = 3_600;
 const SESSION_INVALID_TOKEN: u32 = 6001;
+const ANCHOR_CONSTRAINT_SEEDS: u32 = 2006;
 const PERCHES_PER_BOX_COUNT: usize = sandwich_rules::constants::PERCHES_PER_BOX as usize;
 const LEGACY_TRANSACTION_LIMIT_BYTES: usize = 1232;
+const ADMIN_KEY_SEED: u8 = 255;
 
 const BASE: TransactionTarget = TransactionTarget::Base;
 const ROLLUP: TransactionTarget = TransactionTarget::Ephemeral;
@@ -76,6 +78,10 @@ fn address_of(key: &Pubkey) -> Address {
 
 fn key_of(address: &Address) -> Pubkey {
     Pubkey::new_from_array(address.to_bytes())
+}
+
+fn keypair_from_seed(seed: u8) -> Keypair {
+    Keypair::new_from_array([seed; 32])
 }
 
 fn key_of_signer(keypair: &Keypair) -> Pubkey {
@@ -201,7 +207,7 @@ struct Lab {
 
 impl Lab {
     fn boot() -> Lab {
-        let admin = Keypair::new();
+        let admin = keypair_from_seed(ADMIN_KEY_SEED);
         let mut svm = MagicSVM::new();
         let mut clock: Clock = svm.get_sysvar();
         clock.unix_timestamp = now_unix();
@@ -395,7 +401,7 @@ impl Lab {
 
     fn open_session(&mut self, player: &mut Player) {
         let admin = self.admin.insecure_clone();
-        let session_signer = Keypair::new();
+        let session_signer = Keypair::new_from_array(player.key().to_bytes());
         let session_signer_key = key_of_signer(&session_signer);
         let create = to_instruction(
             session_keys::ID,
@@ -504,6 +510,10 @@ fn start_round_ix(lab: &Lab, table: &Pubkey) -> Instruction {
     )
 }
 
+fn seats_of<'player>(table: &Pubkey, players: impl IntoIterator<Item = &'player Player>) -> Vec<Pubkey> {
+    players.into_iter().map(|player| seat_pda(table, &player.key())).collect()
+}
+
 fn roster_ix(data: impl InstructionData, table: &Pubkey, seats: &[Pubkey]) -> Instruction {
     let mut roster = program_ix(data, accounts::TableRoster { table: *table });
     roster.accounts.extend(seats.iter().map(|seat| AccountMeta::new(address_of(seat), false)));
@@ -520,7 +530,9 @@ fn transaction_bytes(lab: &Lab, fee_payer: &Keypair, instruction: &Instruction) 
 }
 
 fn seated_players(lab: &mut Lab, table: &Pubkey, count: usize) -> Vec<Player> {
-    let players: Vec<Player> = (0..count).map(|_| Player { wallet: Keypair::new(), session_signer: None }).collect();
+    let players: Vec<Player> = (1..=count)
+        .map(|seed| Player { wallet: keypair_from_seed(seed as u8), session_signer: None })
+        .collect();
     for player in &players {
         lab.fund_player(player);
         lab.sit(table, player);
@@ -634,7 +646,7 @@ fn full_round_moves_every_chip_and_settles_once() {
     lab.send_refused(ROLLUP, &[pigeon_session.signer()], &[seat_action_ix(instruction::FlyTo { box_index: 2 }, &table, pigeon_session)], error_code(SandwichError::Stunned), "a stunned pigeon flies");
     lab.send_refused(ROLLUP, &[pigeon_session.signer()], &[cash_out_ix(&lab, &table, pigeon_session, 1)], error_code(SandwichError::StillInRound), "cash out during the round");
 
-    let seats: Vec<Pubkey> = players.iter().map(|player| seat_pda(&table, &player.key())).collect();
+    let seats = seats_of(&table, &players);
     lab.send_refused(ROLLUP, &[&admin], &[roster_ix(instruction::Settle {}, &table, &seats)], error_code(SandwichError::RoundNotOver), "settle before the end");
     let end_tick = lab.table(&table).round.end_tick;
     lab.svm.warp_to_slot(end_tick);
@@ -679,7 +691,7 @@ fn full_round_moves_every_chip_and_settles_once() {
 }
 
 #[test]
-fn land_swat_and_settle_reach_a_full_table_of_21_seats_in_one_transaction() {
+fn a_full_table_of_21_seats_lands_a_swat_on_its_8_perched_seats_and_settles_in_one_transaction() {
     let mut lab = Lab::boot();
     let table = lab.create_table(4);
     let players = seated_players(&mut lab, &table, sandwich_rules::constants::MAX_SEATS);
@@ -701,23 +713,23 @@ fn land_swat_and_settle_reach_a_full_table_of_21_seats_in_one_transaction() {
     }
     lab.send(ROLLUP, &[whale.signer()], &[whale_action_ix(sandwich_box, &table, whale)], "raise_hand");
     lab.advance_ticks(rule_timing().swat_windup_ticks);
-    let seats: Vec<Pubkey> = players.iter().map(|player| seat_pda(&table, &player.key())).collect();
-    let land_swat = roster_ix(instruction::LandSwat {}, &table, &seats);
-    let land_swat_bytes = transaction_bytes(&lab, &admin, &land_swat);
-    let land_swat_cu = lab.send(ROLLUP, &[&admin], &[land_swat], "land_swat with 21 seats");
+    let land_swat = roster_ix(instruction::LandSwat {}, &table, &seats_of(&table, pigeons));
+    let land_swat_cu = lab.send(ROLLUP, &[&admin], &[land_swat], "land_swat with the 8 perched seats");
     assert_eq!(lab.table(&table).round.loose_crumbs[usize::from(sandwich_box)], PERCHES_PER_BOX_COUNT as u64);
+    for pigeon in pigeons {
+        assert!(matches!(lab.seat(&table, &pigeon.key()).pigeon.state, StoredPigeonState::Stunned { box_index: 2, .. }));
+    }
 
     let end_tick = lab.table(&table).round.end_tick;
     lab.svm.warp_to_slot(end_tick);
-    let settle = roster_ix(instruction::Settle {}, &table, &seats);
+    let settle = roster_ix(instruction::Settle {}, &table, &seats_of(&table, &players));
     let settle_bytes = transaction_bytes(&lab, &admin, &settle);
     let settle_cu = lab.send(ROLLUP, &[&admin], &[settle], "settle with 21 seats");
     let chips_after: u64 = players.iter().map(|player| lab.seat(&table, &player.key()).chips).sum();
     assert_eq!(chips_after, sandwich_rules::constants::MAX_SEATS as u64 * BUY_IN_CHIPS);
-    assert!(land_swat_bytes <= LEGACY_TRANSACTION_LIMIT_BYTES, "[land_swat21] {land_swat_bytes} bytes");
     assert!(settle_bytes <= LEGACY_TRANSACTION_LIMIT_BYTES, "[settle21] {settle_bytes} bytes");
     println!(
-        "[land_swat_and_settle_reach_a_full_table_of_21_seats_in_one_transaction] cu land_swat21={land_swat_cu} bytes={land_swat_bytes} settle21={settle_cu} bytes={settle_bytes}"
+        "[a_full_table_of_21_seats_lands_a_swat_on_its_8_perched_seats_and_settles_in_one_transaction] cu land_swat8={land_swat_cu} settle21={settle_cu} bytes={settle_bytes}"
     );
 }
 
@@ -728,7 +740,7 @@ fn land_swat_puts_the_dropped_crumbs_on_the_box_at_the_landing_for_the_next_peck
     let players = seated_players(&mut lab, &table, 4);
     join_buy_in_and_ante(&mut lab, &table, &players);
     let admin = lab.admin.insecure_clone();
-    let seats: Vec<Pubkey> = players.iter().map(|player| seat_pda(&table, &player.key())).collect();
+    let seats = seats_of(&table, &players);
     let stranger = Keypair::new();
     lab.send_refused(ROLLUP, &[&stranger], &[roster_ix(instruction::LandSwat {}, &table, &seats)], error_code(SandwichError::WrongPhase), "land_swat in the lobby");
 
@@ -791,13 +803,184 @@ fn land_swat_puts_the_dropped_crumbs_on_the_box_at_the_landing_for_the_next_peck
 }
 
 #[test]
+fn land_swat_on_only_the_seats_of_the_swatted_box_matches_the_full_roster() {
+    let mut lab = Lab::boot();
+    let full_table = lab.create_table(6);
+    let perched_table = lab.create_table(7);
+    let players = seated_players(&mut lab, &full_table, 4);
+    for player in &players {
+        lab.sit(&perched_table, player);
+    }
+    let tables = [full_table, perched_table];
+    for table in &tables {
+        join_buy_in_and_ante(&mut lab, table, &players);
+    }
+    let admin = lab.admin.insecure_clone();
+    let (sandwich_box, other_box) = (1u8, 0u8);
+    lab.svm.set_vrf_randomness(Some(whale_randomness(3, sandwich_box)));
+    for table in &tables {
+        lab.send(ROLLUP, &[&admin], &[start_round_ix(&lab, table)], "start_round");
+    }
+    lab.svm.warp_to_slot(lab.slot() + 1);
+    for table in &tables {
+        assert!(matches!(lab.table(table).phase, Phase::Live { whale_seat: 3 }));
+    }
+
+    let [greedy, modest, wanderer, whale] = [&players[0], &players[1], &players[2], &players[3]];
+    for table in &tables {
+        for pigeon in [greedy, modest] {
+            lab.send(ROLLUP, &[pigeon.signer()], &[seat_action_ix(instruction::FlyTo { box_index: sandwich_box }, table, pigeon)], "fly_to the sandwich");
+        }
+        lab.send(ROLLUP, &[wanderer.signer()], &[seat_action_ix(instruction::FlyTo { box_index: other_box }, table, wanderer)], "fly_to the other box");
+    }
+    lab.advance_ticks(rule_timing().flight_ticks);
+    for peck_number in 0..3 {
+        for table in &tables {
+            lab.send(ROLLUP, &[greedy.signer()], &[seat_action_ix(instruction::Peck {}, table, greedy)], "peck (greedy)");
+            if peck_number == 0 {
+                lab.send(ROLLUP, &[modest.signer()], &[seat_action_ix(instruction::Peck {}, table, modest)], "peck (modest)");
+            }
+        }
+        lab.advance_ticks(rule_timing().peck_cooldown_ticks);
+    }
+    for table in &tables {
+        lab.send(ROLLUP, &[whale.signer()], &[whale_action_ix(sandwich_box, table, whale)], "raise_hand");
+    }
+    lab.advance_ticks(rule_timing().swat_windup_ticks);
+
+    let full_cu = lab.send(ROLLUP, &[&admin], &[roster_ix(instruction::LandSwat {}, &full_table, &seats_of(&full_table, &players))], "land_swat with the full roster");
+    let perched_cu = lab.send(ROLLUP, &[&admin], &[roster_ix(instruction::LandSwat {}, &perched_table, &seats_of(&perched_table, [greedy, modest]))], "land_swat with the perched seats");
+    let landed_full = lab.table(&full_table);
+    let landed_perched = lab.table(&perched_table);
+    assert_eq!(landed_perched.round.loose_crumbs, [0, 3, 0]);
+    assert!(landed_perched.round == landed_full.round);
+    for pigeon in [greedy, modest] {
+        let full_pigeon = lab.seat(&full_table, &pigeon.key()).pigeon;
+        assert!(matches!(full_pigeon.state, StoredPigeonState::Stunned { box_index: 1, .. }));
+        assert!(lab.seat(&perched_table, &pigeon.key()).pigeon == full_pigeon);
+    }
+
+    lab.svm.warp_to_slot(landed_full.round.end_tick);
+    for table in &tables {
+        lab.send(ROLLUP, &[&admin], &[roster_ix(instruction::Settle {}, table, &seats_of(table, &players))], "settle");
+    }
+    let chips_at = |table: &Pubkey| -> Vec<u64> { players.iter().map(|player| lab.seat(table, &player.key()).chips).collect() };
+    let anted_chips = BUY_IN_CHIPS - CHIPS_PER_ANTE;
+    assert_eq!(chips_at(&full_table), [anted_chips + 1, anted_chips, anted_chips, anted_chips + 4 * CHIPS_PER_ANTE - 1]);
+    assert_eq!(chips_at(&perched_table), chips_at(&full_table));
+
+    let cross_table_cash_out = program_ix(
+        instruction::CashOut { chips: 1 },
+        accounts::CashOut {
+            signer: greedy.key(),
+            table: full_table,
+            seat: seat_pda(&perched_table, &greedy.key()),
+            custody: custody_pda(&full_table),
+            wallet_token: ata_of(&greedy.key(), &lab.mint),
+            escrow_token: ata_of(&custody_pda(&full_table), &lab.mint),
+            token_program: token_program_key(),
+            session_token: None,
+        },
+    );
+    lab.send_refused(ROLLUP, &[&greedy.wallet], &[cross_table_cash_out], ANCHOR_CONSTRAINT_SEEDS, "a seat of one table cashes out at another");
+    println!("[land_swat_on_only_the_seats_of_the_swatted_box_matches_the_full_roster] cu land_swat_full4={full_cu} land_swat_perched2={perched_cu}");
+}
+
+#[test]
+fn a_lone_ante_is_withdrawn_then_cashed_out_and_the_seat_leaves() {
+    let mut lab = Lab::boot();
+    let table = lab.create_table(8);
+    let players = seated_players(&mut lab, &table, 2);
+    let (loner, latecomer) = (&players[0], &players[1]);
+    join_buy_in_and_ante(&mut lab, &table, &players[..1]);
+    let ante_tick = lab.slot();
+    lab.send_refused(ROLLUP, &[loner.signer()], &[cash_out_ix(&lab, &table, loner, 1)], error_code(SandwichError::StillInRound), "cash out a lone ante");
+    lab.send_refused(ROLLUP, &[loner.signer()], &[seat_action_ix(instruction::Leave {}, &table, loner)], error_code(SandwichError::StillInRound), "leave with a lone ante");
+
+    lab.advance_ticks(PECK_COOLDOWN_TICKS);
+    join_buy_in_and_ante(&mut lab, &table, &players[1..]);
+    lab.send(ROLLUP, &[loner.signer()], &[seat_action_ix(instruction::WithdrawAnte {}, &table, loner)], "withdraw_ante with another ante left");
+    let one_ante_left = lab.table(&table);
+    assert!(one_ante_left.phase == Phase::Lobby { first_ante_tick: ante_tick });
+    assert_eq!(one_ante_left.anted, 0b10);
+    assert_eq!(lab.seat(&table, &loner.key()).chips, BUY_IN_CHIPS);
+
+    let withdraw_cu = lab.send(ROLLUP, &[latecomer.signer()], &[seat_action_ix(instruction::WithdrawAnte {}, &table, latecomer)], "withdraw_ante of the last ante");
+    let no_ante_left = lab.table(&table);
+    assert!(no_ante_left.phase == Phase::Lobby { first_ante_tick: 0 });
+    assert_eq!(no_ante_left.anted, 0);
+    lab.send_refused(ROLLUP, &[loner.signer()], &[seat_action_ix(instruction::WithdrawAnte {}, &table, loner)], error_code(SandwichError::NotInRound), "second withdraw_ante");
+
+    for player in &players {
+        assert_eq!(lab.seat(&table, &player.key()).chips, BUY_IN_CHIPS);
+        lab.send(ROLLUP, &[player.signer()], &[cash_out_ix(&lab, &table, player, BUY_IN_CHIPS)], "cash_out");
+        lab.send(ROLLUP, &[player.signer()], &[seat_action_ix(instruction::Leave {}, &table, player)], "leave");
+    }
+    assert_eq!(lab.token_units(ROLLUP, &ata_of(&custody_pda(&table), &lab.mint)), 0);
+    assert!(lab.table(&table).seats.iter().all(|wallet| *wallet == Pubkey::default()));
+    println!("[a_lone_ante_is_withdrawn_then_cashed_out_and_the_seat_leaves] cu withdraw_ante={withdraw_cu}");
+}
+
+#[test]
+fn abort_round_refunds_every_ante_once_the_settle_window_has_passed() {
+    let mut lab = Lab::boot();
+    let table = lab.create_table(9);
+    let players = seated_players(&mut lab, &table, 3);
+    join_buy_in_and_ante(&mut lab, &table, &players);
+    let admin = lab.admin.insecure_clone();
+    let sandwich_box = 0u8;
+    lab.svm.set_vrf_randomness(Some(whale_randomness(2, sandwich_box)));
+    lab.send(ROLLUP, &[&admin], &[start_round_ix(&lab, &table)], "start_round");
+    lab.svm.warp_to_slot(lab.slot() + 1);
+    assert!(matches!(lab.table(&table).phase, Phase::Live { whale_seat: 2 }));
+    let (pecker, idler) = (&players[0], &players[1]);
+    lab.send_refused(ROLLUP, &[idler.signer()], &[seat_action_ix(instruction::WithdrawAnte {}, &table, idler)], error_code(SandwichError::WrongPhase), "withdraw_ante during the round");
+    lab.send(ROLLUP, &[pecker.signer()], &[seat_action_ix(instruction::FlyTo { box_index: sandwich_box }, &table, pecker)], "fly_to");
+    lab.advance_ticks(rule_timing().flight_ticks);
+    for _ in 0..2 {
+        lab.send(ROLLUP, &[pecker.signer()], &[seat_action_ix(instruction::Peck {}, &table, pecker)], "peck");
+        lab.advance_ticks(rule_timing().peck_cooldown_ticks);
+    }
+    assert_eq!(lab.seat(&table, &pecker.key()).pigeon.beak_crumbs, 2);
+
+    let seats = seats_of(&table, &players);
+    let end_tick = lab.table(&table).round.end_tick;
+    lab.svm.warp_to_slot(end_tick + SETTLE_WINDOW_TICKS - 1);
+    lab.send_refused(ROLLUP, &[pecker.signer()], &[cash_out_ix(&lab, &table, pecker, 1)], error_code(SandwichError::StillInRound), "cash out of an unsettled round");
+    lab.send_refused(ROLLUP, &[&admin], &[roster_ix(instruction::AbortRound {}, &table, &seats)], error_code(SandwichError::AbortTooEarly), "abort_round within the settle window");
+    lab.svm.warp_to_slot(end_tick + SETTLE_WINDOW_TICKS);
+    lab.send_refused(ROLLUP, &[&admin], &[roster_ix(instruction::AbortRound {}, &table, &seats[..2])], error_code(SandwichError::MissingSeat), "abort_round without every anted seat");
+    let stranger = Keypair::new();
+    let abort_cu = lab.send(ROLLUP, &[&stranger], &[roster_ix(instruction::AbortRound {}, &table, &seats)], "abort_round");
+
+    let aborted = lab.table(&table);
+    assert!(aborted.phase == Phase::Lobby { first_ante_tick: 0 });
+    assert_eq!(aborted.anted, 0);
+    assert_eq!(aborted.round_number, 1);
+    assert!(aborted.last_result.is_none());
+    for player in &players {
+        let seat = lab.seat(&table, &player.key());
+        assert_eq!(seat.chips, BUY_IN_CHIPS);
+        assert_eq!(seat.pigeon.beak_crumbs, 0);
+    }
+    lab.send_refused(ROLLUP, &[&admin], &[roster_ix(instruction::Settle {}, &table, &seats)], error_code(SandwichError::WrongPhase), "settle after the abort");
+    lab.send_refused(ROLLUP, &[&admin], &[roster_ix(instruction::AbortRound {}, &table, &seats)], error_code(SandwichError::WrongPhase), "second abort_round");
+
+    for player in &players {
+        lab.send(ROLLUP, &[player.signer()], &[cash_out_ix(&lab, &table, player, BUY_IN_CHIPS)], "cash_out");
+    }
+    assert_eq!(lab.token_units(ROLLUP, &ata_of(&custody_pda(&table), &lab.mint)), 0);
+    println!("[abort_round_refunds_every_ante_once_the_settle_window_has_passed] cu abort_round3={abort_cu}");
+}
+
+#[test]
 fn cancel_draw_refunds_antes_and_refuses_the_late_draw() {
     let mut lab = Lab::boot();
     let table = lab.create_table(3);
     let players = seated_players(&mut lab, &table, 2);
     join_buy_in_and_ante(&mut lab, &table, &players);
     let admin = lab.admin.insecure_clone();
-    let seats: Vec<Pubkey> = players.iter().map(|player| seat_pda(&table, &player.key())).collect();
+    let seats = seats_of(&table, &players);
 
     lab.send(ROLLUP, &[&admin], &[start_round_ix(&lab, &table)], "start_round");
     let Phase::Drawing { requested_tick } = lab.table(&table).phase else {

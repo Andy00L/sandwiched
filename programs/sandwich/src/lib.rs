@@ -31,7 +31,7 @@ pub use test_usdc::*;
 
 use game::{
     anted_index, count_anted, count_seated, current_tick, is_anted, is_seat_anted, live_round,
-    load_anted_seats, nth_anted_seat, read_table_data, rule_timing, seat_bit, seated_index,
+    load_anted_seats, nth_anted_seat, read_table_data, seat_bit, seated_index, RosterCoverage,
 };
 
 declare_id!("CvPa7U3XSH6QHGkG2PoPokuUAQd2xJqYSTupmKYank2n");
@@ -232,6 +232,26 @@ pub mod sandwich {
         Ok(())
     }
 
+    #[session_auth_or(
+        ctx.accounts.seat.wallet == ctx.accounts.signer.key(),
+        SandwichError::NotSeatOwner
+    )]
+    pub fn withdraw_ante(ctx: Context<SeatAction>) -> Result<()> {
+        let table = &mut ctx.accounts.table;
+        let seat = &mut ctx.accounts.seat;
+        require!(matches!(table.phase, Phase::Lobby { .. }), SandwichError::WrongPhase);
+        let seat_index = anted_index(table, seat)?;
+        seat.chips = seat
+            .chips
+            .checked_add(CHIPS_PER_ANTE)
+            .ok_or(SandwichError::MathOverflow)?;
+        table.anted &= !seat_bit(seat_index);
+        if table.anted == 0 {
+            table.phase = Phase::Lobby { first_ante_tick: 0 };
+        }
+        Ok(())
+    }
+
     pub fn start_round(ctx: Context<StartRound>) -> Result<()> {
         let now_tick = current_tick()?;
         let table_key = ctx.accounts.table.key();
@@ -244,7 +264,7 @@ pub mod sandwich {
             count_seated(table),
             first_ante_tick,
             now_tick,
-            &rule_timing()?,
+            &RULE_TIMING,
         )
         .map_err(SandwichError::from)?;
         let mut caller_seed = [0u8; 32];
@@ -289,7 +309,7 @@ pub mod sandwich {
             sandwich_box,
             anted_players,
             current_tick()?,
-            &rule_timing()?,
+            &RULE_TIMING,
         )
         .map_err(SandwichError::from)?;
         table.phase = Phase::Live { whale_seat };
@@ -305,17 +325,16 @@ pub mod sandwich {
             return err!(SandwichError::WrongPhase);
         };
         let timeout_tick = requested_tick
-            .checked_add(rule_timing()?.draw_timeout_ticks)
+            .checked_add(RULE_TIMING.draw_timeout_ticks)
             .ok_or(SandwichError::MathOverflow)?;
         require!(current_tick()? >= timeout_tick, SandwichError::DrawNotTimedOut);
-        let seats = load_anted_seats(&table_key, table, ctx.remaining_accounts)?;
-        for mut seat in seats {
-            seat.chips = seat
-                .chips
-                .checked_add(CHIPS_PER_ANTE)
-                .ok_or(SandwichError::MathOverflow)?;
-            seat.exit(&crate::ID)?;
-        }
+        let seats = load_anted_seats(
+            &table_key,
+            table,
+            ctx.remaining_accounts,
+            RosterCoverage::EveryAntedSeat,
+        )?;
+        refund_antes(seats)?;
         close_round(table)?;
         msg!("[cancel_draw] antes refunded");
         Ok(())
@@ -368,7 +387,7 @@ pub mod sandwich {
         let seat_index = anted_index(table, &ctx.accounts.seat)?;
         require_eq!(seat_index, whale_seat, SandwichError::NotTheWhale);
         round
-            .raise_hand(box_index, current_tick()?, &rule_timing()?)
+            .raise_hand(box_index, current_tick()?, &RULE_TIMING)
             .map_err(SandwichError::from)?;
         table.round = round.into();
         Ok(())
@@ -379,11 +398,16 @@ pub mod sandwich {
         let table_key = ctx.accounts.table.key();
         let table = &mut ctx.accounts.table;
         let (whale_seat, mut round) = live_round(table)?;
-        let mut seats = load_anted_seats(&table_key, table, ctx.remaining_accounts)?;
+        let mut seats = load_anted_seats(
+            &table_key,
+            table,
+            ctx.remaining_accounts,
+            RosterCoverage::AnyAntedSeats,
+        )?;
         seats.retain(|seat| seat.seat_index != Some(whale_seat));
         let mut pigeons: Vec<Pigeon> = seats.iter().map(|seat| seat.pigeon.into()).collect();
-        let report = round
-            .land_swat(&mut pigeons, now_tick, &rule_timing()?)
+        round
+            .land_swat(&mut pigeons, now_tick, &RULE_TIMING)
             .map_err(SandwichError::from)?;
         for (seat, pigeon) in seats.iter_mut().zip(pigeons) {
             let landed = StoredPigeon::from(pigeon);
@@ -393,7 +417,6 @@ pub mod sandwich {
             }
         }
         table.round = round.into();
-        msg!("[land_swat] hits {} dropped {}", report.hit_count, report.dropped_crumbs);
         Ok(())
     }
 
@@ -403,7 +426,12 @@ pub mod sandwich {
         let table = &mut ctx.accounts.table;
         let (whale_seat, mut round) = live_round(table)?;
         require!(now_tick >= round.end_tick, SandwichError::RoundNotOver);
-        let mut seats = load_anted_seats(&table_key, table, ctx.remaining_accounts)?;
+        let mut seats = load_anted_seats(
+            &table_key,
+            table,
+            ctx.remaining_accounts,
+            RosterCoverage::EveryAntedSeat,
+        )?;
         let whale_position = seats
             .iter()
             .position(|seat| seat.seat_index == Some(whale_seat))
@@ -419,7 +447,7 @@ pub mod sandwich {
             .map(|(_, seat)| seat.pigeon.into())
             .collect();
         let settlement = round
-            .settle(&mut pigeons, now_tick, &rule_timing()?)
+            .settle(&mut pigeons, now_tick, &RULE_TIMING)
             .map_err(SandwichError::from)?;
         let mut settled_pigeons = pigeons.into_iter();
         for (position, seat) in seats.iter_mut().enumerate() {
@@ -440,12 +468,29 @@ pub mod sandwich {
             whale_crumbs: settlement.whale_crumbs,
             pigeon_crumbs: settlement.pigeon_crumbs,
         });
-        msg!(
-            "[settle] round {} whale {} pigeons {}",
-            table.round_number,
-            settlement.whale_crumbs,
-            settlement.pigeon_crumbs
-        );
+        close_round(table)
+    }
+
+    pub fn abort_round<'info>(ctx: Context<'info, TableRoster<'info>>) -> Result<()> {
+        let table_key = ctx.accounts.table.key();
+        let table = &mut ctx.accounts.table;
+        let (_, round) = live_round(table)?;
+        let abort_tick = round
+            .end_tick
+            .checked_add(SETTLE_WINDOW_TICKS)
+            .ok_or(SandwichError::MathOverflow)?;
+        require!(current_tick()? >= abort_tick, SandwichError::AbortTooEarly);
+        let seats = load_anted_seats(
+            &table_key,
+            table,
+            ctx.remaining_accounts,
+            RosterCoverage::EveryAntedSeat,
+        )?;
+        let refunded_crumbs = u64::from(count_anted(table.anted))
+            .checked_mul(CHIPS_PER_ANTE)
+            .ok_or(SandwichError::MathOverflow)?;
+        require_eq!(refunded_crumbs, round.anted_crumbs, SandwichError::ChipsNotConserved);
+        refund_antes(seats)?;
         close_round(table)
     }
 
@@ -458,6 +503,18 @@ pub mod sandwich {
     pub fn faucet(ctx: Context<ClaimFaucet>) -> Result<()> {
         test_usdc::claim_faucet(ctx)
     }
+}
+
+fn refund_antes(seats: Vec<Account<Seat>>) -> Result<()> {
+    for mut seat in seats {
+        seat.chips = seat
+            .chips
+            .checked_add(CHIPS_PER_ANTE)
+            .ok_or(SandwichError::MathOverflow)?;
+        seat.pigeon = Pigeon::at_round_start().into();
+        seat.exit(&crate::ID)?;
+    }
+    Ok(())
 }
 
 fn close_round(table: &mut Table) -> Result<()> {
@@ -478,7 +535,7 @@ fn move_pigeon(
     let seat_index = anted_index(table, seat)?;
     require_neq!(seat_index, whale_seat, SandwichError::WhaleCannotPeck);
     let mut pigeon: Pigeon = seat.pigeon.into();
-    let outcome = act(&mut round, &mut pigeon, current_tick()?, &rule_timing()?)
+    let outcome = act(&mut round, &mut pigeon, current_tick()?, &RULE_TIMING)
         .map_err(SandwichError::from)?;
     if let MoveOutcome::FlattenedBySwat { dropped_crumbs } = outcome {
         msg!("[{}] flattened by a swat, dropped {}", instruction_name, dropped_crumbs);

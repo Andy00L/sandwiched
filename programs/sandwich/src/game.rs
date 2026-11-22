@@ -1,13 +1,9 @@
 use anchor_lang::prelude::*;
-use sandwich_rules::{Round, Timing};
+use sandwich_rules::Round;
 
-use crate::constants::{SEAT_COUNT, SEAT_SEED, TABLE_SEED, TICK_MS};
+use crate::constants::{SEAT_COUNT, SEAT_SEED, TABLE_SEED};
 use crate::error::SandwichError;
 use crate::state::{Phase, Seat, Table};
-
-pub fn rule_timing() -> Result<Timing> {
-    Ok(Timing::from_tick_ms(TICK_MS).map_err(SandwichError::from)?)
-}
 
 pub fn current_tick() -> Result<u64> {
     Ok(Clock::get()?.slot)
@@ -85,10 +81,17 @@ pub fn read_table_data(table_info: &AccountInfo) -> Result<Table> {
     Ok(table)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RosterCoverage {
+    EveryAntedSeat,
+    AnyAntedSeats,
+}
+
 pub fn load_anted_seats<'info>(
     table_key: &Pubkey,
     table: &Table,
     seat_infos: &'info [AccountInfo<'info>],
+    coverage: RosterCoverage,
 ) -> Result<Vec<Account<'info, Seat>>> {
     let mut seen: u32 = 0;
     let mut seats = Vec::with_capacity(seat_infos.len());
@@ -107,6 +110,8 @@ pub fn load_anted_seats<'info>(
         seen |= bit;
         seats.push(seat);
     }
-    require_eq!(seen, table.anted, SandwichError::MissingSeat);
+    if coverage == RosterCoverage::EveryAntedSeat {
+        require_eq!(seen, table.anted, SandwichError::MissingSeat);
+    }
     Ok(seats)
 }

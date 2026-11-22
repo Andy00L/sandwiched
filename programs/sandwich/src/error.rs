@@ -89,6 +89,8 @@ pub enum SandwichError {
     ChipsRemaining,
     #[msg("The account is not a table of this program")]
     NotTable,
+    #[msg("Only settle can end the round until its settle window closes")]
+    AbortTooEarly,
 }
 
 impl From<RuleError> for SandwichError {

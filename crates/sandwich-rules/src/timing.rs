@@ -20,23 +20,31 @@ pub struct Timing {
 }
 
 impl Timing {
-    pub fn from_tick_ms(tick_ms: u64) -> Result<Timing, RuleError> {
+    pub const fn from_tick_ms(tick_ms: u64) -> Result<Timing, RuleError> {
         if tick_ms == 0 {
             return Err(RuleError::ZeroTickLength);
         }
-        let to_ticks = |duration_ms: u64| duration_ms.div_ceil(tick_ms).max(1);
         Ok(Timing {
-            lobby_ticks: to_ticks(LOBBY_MS),
-            draw_timeout_ticks: to_ticks(DRAW_TIMEOUT_MS),
-            hide_ticks: to_ticks(HIDE_MS),
-            round_ticks: to_ticks(ROUND_MS),
-            flight_ticks: to_ticks(FLIGHT_MS),
-            peck_cooldown_ticks: to_ticks(PECK_COOLDOWN_MS),
-            empty_box_stun_ticks: to_ticks(EMPTY_BOX_STUN_MS),
-            swat_windup_ticks: to_ticks(SWAT_WINDUP_MS),
-            swat_cooldown_ticks: to_ticks(SWAT_COOLDOWN_MS),
-            swat_stun_ticks: to_ticks(SWAT_STUN_MS),
-            switch_cooldown_ticks: to_ticks(SWITCH_COOLDOWN_MS),
+            lobby_ticks: duration_in_ticks(LOBBY_MS, tick_ms),
+            draw_timeout_ticks: duration_in_ticks(DRAW_TIMEOUT_MS, tick_ms),
+            hide_ticks: duration_in_ticks(HIDE_MS, tick_ms),
+            round_ticks: duration_in_ticks(ROUND_MS, tick_ms),
+            flight_ticks: duration_in_ticks(FLIGHT_MS, tick_ms),
+            peck_cooldown_ticks: duration_in_ticks(PECK_COOLDOWN_MS, tick_ms),
+            empty_box_stun_ticks: duration_in_ticks(EMPTY_BOX_STUN_MS, tick_ms),
+            swat_windup_ticks: duration_in_ticks(SWAT_WINDUP_MS, tick_ms),
+            swat_cooldown_ticks: duration_in_ticks(SWAT_COOLDOWN_MS, tick_ms),
+            swat_stun_ticks: duration_in_ticks(SWAT_STUN_MS, tick_ms),
+            switch_cooldown_ticks: duration_in_ticks(SWITCH_COOLDOWN_MS, tick_ms),
         })
+    }
+}
+
+const fn duration_in_ticks(duration_ms: u64, tick_ms: u64) -> u64 {
+    let ticks = duration_ms.div_ceil(tick_ms);
+    if ticks == 0 {
+        1
+    } else {
+        ticks
     }
 }

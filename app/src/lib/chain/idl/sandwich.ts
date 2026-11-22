@@ -14,6 +14,26 @@ export type Sandwich = {
   },
   "instructions": [
     {
+      "name": "abortRound",
+      "discriminator": [
+        15,
+        165,
+        47,
+        198,
+        108,
+        207,
+        150,
+        208
+      ],
+      "accounts": [
+        {
+          "name": "table",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "ante",
       "discriminator": [
         166,
@@ -32,26 +52,7 @@ export type Sandwich = {
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -104,26 +105,7 @@ export type Sandwich = {
           "signer": true
         },
         {
-          "name": "table",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "name": "table"
         },
         {
           "name": "seat",
@@ -185,26 +167,7 @@ export type Sandwich = {
       "accounts": [
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -227,26 +190,7 @@ export type Sandwich = {
           "signer": true
         },
         {
-          "name": "table",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "name": "table"
         },
         {
           "name": "seat",
@@ -945,26 +889,7 @@ export type Sandwich = {
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -1023,26 +948,7 @@ export type Sandwich = {
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -1092,26 +998,7 @@ export type Sandwich = {
       "accounts": [
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -1135,26 +1022,7 @@ export type Sandwich = {
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -1209,26 +1077,7 @@ export type Sandwich = {
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": [
@@ -1266,26 +1115,7 @@ export type Sandwich = {
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -1444,26 +1274,7 @@ export type Sandwich = {
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -1517,26 +1328,7 @@ export type Sandwich = {
       "accounts": [
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -1618,26 +1410,7 @@ export type Sandwich = {
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "oracleQueue",
@@ -1698,26 +1471,61 @@ export type Sandwich = {
         },
         {
           "name": "table",
+          "writable": true
+        },
+        {
+          "name": "seat",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  116,
+                  115,
+                  101,
                   97,
-                  98,
-                  108,
-                  101
+                  116
                 ]
               },
               {
                 "kind": "account",
-                "path": "table.table_id",
-                "account": "table"
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "seat"
               }
             ]
           }
+        },
+        {
+          "name": "sessionToken",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "withdrawAnte",
+      "discriminator": [
+        38,
+        56,
+        26,
+        90,
+        123,
+        68,
+        155,
+        207
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true
         },
         {
           "name": "seat",
@@ -2004,6 +1812,11 @@ export type Sandwich = {
       "code": 7041,
       "name": "notTable",
       "msg": "The account is not a table of this program"
+    },
+    {
+      "code": 7042,
+      "name": "abortTooEarly",
+      "msg": "Only settle can end the round until its settle window closes"
     }
   ],
   "types": [

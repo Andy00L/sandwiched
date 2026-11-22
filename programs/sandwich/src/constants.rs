@@ -1,12 +1,19 @@
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::vrf::consts::{program_identity_pubkey, scoped_vrf_identity_const};
 use sandwich_rules::constants::MAX_SEATS;
+use sandwich_rules::Timing;
 
 pub const TABLE_SEED: &[u8] = b"table";
 pub const SEAT_SEED: &[u8] = b"seat";
 pub const CUSTODY_SEED: &[u8] = b"custody";
 
 pub const TICK_MS: u64 = 10;
+pub const RULE_TIMING: Timing = match Timing::from_tick_ms(TICK_MS) {
+    Ok(timing) => timing,
+    Err(_) => panic!("TICK_MS must be positive"),
+};
+pub const SETTLE_WINDOW_MS: u64 = 30_000;
+pub const SETTLE_WINDOW_TICKS: u64 = SETTLE_WINDOW_MS.div_ceil(TICK_MS);
 pub const SEAT_COUNT: u8 = MAX_SEATS as u8;
 
 pub const VRF_REQUEST_IDENTITY: Pubkey = program_identity_pubkey(&crate::ID);

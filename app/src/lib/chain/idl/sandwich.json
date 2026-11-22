@@ -8,6 +8,26 @@
   },
   "instructions": [
     {
+      "name": "abort_round",
+      "discriminator": [
+        15,
+        165,
+        47,
+        198,
+        108,
+        207,
+        150,
+        208
+      ],
+      "accounts": [
+        {
+          "name": "table",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "ante",
       "discriminator": [
         166,
@@ -26,26 +46,7 @@
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -98,26 +99,7 @@
           "signer": true
         },
         {
-          "name": "table",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "name": "table"
         },
         {
           "name": "seat",
@@ -179,26 +161,7 @@
       "accounts": [
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -221,26 +184,7 @@
           "signer": true
         },
         {
-          "name": "table",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "name": "table"
         },
         {
           "name": "seat",
@@ -939,26 +883,7 @@
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -1017,26 +942,7 @@
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -1086,26 +992,7 @@
       "accounts": [
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -1129,26 +1016,7 @@
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -1203,26 +1071,7 @@
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": [
@@ -1260,26 +1109,7 @@
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -1438,26 +1268,7 @@
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "seat",
@@ -1511,26 +1322,7 @@
       "accounts": [
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -1612,26 +1404,7 @@
         },
         {
           "name": "table",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  98,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "oracle_queue",
@@ -1692,26 +1465,61 @@
         },
         {
           "name": "table",
+          "writable": true
+        },
+        {
+          "name": "seat",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  116,
+                  115,
+                  101,
                   97,
-                  98,
-                  108,
-                  101
+                  116
                 ]
               },
               {
                 "kind": "account",
-                "path": "table.table_id",
-                "account": "Table"
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "Seat"
               }
             ]
           }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "withdraw_ante",
+      "discriminator": [
+        38,
+        56,
+        26,
+        90,
+        123,
+        68,
+        155,
+        207
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "table",
+          "writable": true
         },
         {
           "name": "seat",
@@ -1998,6 +1806,11 @@
       "code": 7041,
       "name": "NotTable",
       "msg": "The account is not a table of this program"
+    },
+    {
+      "code": 7042,
+      "name": "AbortTooEarly",
+      "msg": "Only settle can end the round until its settle window closes"
     }
   ],
   "types": [

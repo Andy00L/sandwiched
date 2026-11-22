@@ -88,7 +88,7 @@ const BLOCKHASH_REFRESH_MS = 1_000;
 type Player = { name: string; wallet: Keypair; sessionSigner: Keypair };
 type ActionRecord = { player: string; action: string; ok: boolean; kind: string; error: string | null; sentAtMs: number; ackMs: number };
 type SwatLanding = { signature: string; landsTick: bigint; looseBefore: bigint[]; looseAfter: bigint[] };
-type LandedSwat = SwatLanding & { computeUnits: number | null; programLog: string | null };
+type LandedSwat = SwatLanding & { computeUnits: number | null };
 type Context = {
   program: SandwichProgram;
   session: SessionProgram;
@@ -222,8 +222,6 @@ const watchStuns = (context: Context, players: Player[], tally: StunTally): numb
   );
 };
 
-const LAND_SWAT_LOG_PREFIX = "Program log: [land_swat]";
-
 const readLandedSwats = async (context: Context, landings: SwatLanding[]): Promise<LandedSwat[]> => {
   const landed: LandedSwat[] = [];
   for (const landing of landings) {
@@ -231,7 +229,6 @@ const readLandedSwats = async (context: Context, landings: SwatLanding[]): Promi
     landed.push({
       ...landing,
       computeUnits: execution.ok ? execution.value.computeUnits : null,
-      programLog: execution.ok ? (execution.value.logs.find((line) => line.startsWith(LAND_SWAT_LOG_PREFIX)) ?? null) : null,
     });
   }
   return landed;
@@ -521,7 +518,6 @@ const runHeadlessRound = async (): Promise<Result<Record<string, unknown>>> => {
     landSwat: {
       succeeded: landedSwats.length,
       computeUnits: summarize(landedSwats.flatMap((landed) => (landed.computeUnits === null ? [] : [landed.computeUnits]))),
-      firstWithDrops: landedSwats.find((landed) => landed.programLog !== null && !landed.programLog.endsWith("dropped 0")) ?? null,
     },
     adminSpentLamports: adminLamportsBefore - adminLamportsAfter,
   };

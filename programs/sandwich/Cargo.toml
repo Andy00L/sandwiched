@@ -10,7 +10,7 @@ crate-type = ["cdylib", "lib"]
 name = "sandwich"
 
 [features]
-default = ["faucet"]
+default = ["faucet", "no-log-ix-name"]
 faucet = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []

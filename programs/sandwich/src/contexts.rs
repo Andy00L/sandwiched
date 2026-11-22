@@ -71,7 +71,7 @@ pub struct DelegateSeat<'info> {
 #[derive(Accounts, Session)]
 pub struct SeatAction<'info> {
     pub signer: Signer<'info>,
-    #[account(mut, seeds = [TABLE_SEED, &table.table_id.to_le_bytes()], bump = table.bump)]
+    #[account(mut)]
     pub table: Box<Account<'info, Table>>,
     #[account(
         mut,
@@ -86,7 +86,7 @@ pub struct SeatAction<'info> {
 #[derive(Accounts, Session)]
 pub struct WhaleAction<'info> {
     pub signer: Signer<'info>,
-    #[account(mut, seeds = [TABLE_SEED, &table.table_id.to_le_bytes()], bump = table.bump)]
+    #[account(mut)]
     pub table: Box<Account<'info, Table>>,
     #[account(seeds = [SEAT_SEED, table.key().as_ref(), seat.wallet.as_ref()], bump = seat.bump)]
     pub seat: Account<'info, Seat>,
@@ -97,7 +97,6 @@ pub struct WhaleAction<'info> {
 #[derive(Accounts)]
 pub struct BuyIn<'info> {
     pub wallet: Signer<'info>,
-    #[account(seeds = [TABLE_SEED, &table.table_id.to_le_bytes()], bump = table.bump)]
     pub table: Box<Account<'info, Table>>,
     #[account(
         mut,
@@ -119,7 +118,6 @@ pub struct BuyIn<'info> {
 #[derive(Accounts, Session)]
 pub struct CashOut<'info> {
     pub signer: Signer<'info>,
-    #[account(seeds = [TABLE_SEED, &table.table_id.to_le_bytes()], bump = table.bump)]
     pub table: Box<Account<'info, Table>>,
     #[account(
         mut,
@@ -148,7 +146,7 @@ pub struct CashOut<'info> {
 pub struct StartRound<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(mut, seeds = [TABLE_SEED, &table.table_id.to_le_bytes()], bump = table.bump)]
+    #[account(mut)]
     pub table: Box<Account<'info, Table>>,
     /// CHECK: the delegated VRF queue; the VRF program validates it.
     #[account(mut, address = DEFAULT_EPHEMERAL_QUEUE @ SandwichError::UnknownQueue)]
@@ -167,12 +165,12 @@ impl StartRound<'_> {
 pub struct OnWhaleDrawn<'info> {
     #[account(address = VRF_CALLBACK_IDENTITY @ SandwichError::NotVrf)]
     pub vrf_program_identity: Signer<'info>,
-    #[account(mut, seeds = [TABLE_SEED, &table.table_id.to_le_bytes()], bump = table.bump)]
+    #[account(mut)]
     pub table: Box<Account<'info, Table>>,
 }
 
 #[derive(Accounts)]
 pub struct TableRoster<'info> {
-    #[account(mut, seeds = [TABLE_SEED, &table.table_id.to_le_bytes()], bump = table.bump)]
+    #[account(mut)]
     pub table: Box<Account<'info, Table>>,
 }
