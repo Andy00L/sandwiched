@@ -46,6 +46,9 @@ const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 10_000;
 const SUBSCRIBE_RETRY_BASE_MS = 500;
 const SUBSCRIBE_RETRY_MAX_MS = 10_000;
+const SUBSCRIBE_ANSWER_TIMEOUT_MS = 5_000;
+const READ_RETRY_MS = 1_000;
+const READ_FAILURES_BEFORE_DEGRADED = 2;
 const MAX_ACCOUNTS_PER_READ = 100;
 
 type ChangeListener = (change: AccountChange) => void;
@@ -57,6 +60,7 @@ type Watcher = {
   subscriptionId: number | null;
   subscribeAttempts: number;
   subscribeRetry: Timeout | null;
+  subscribeDeadline: Timeout | null;
   lastSlot: number;
   lastOwnerText: string | null;
   lastDataBase64: string | null;
@@ -130,11 +134,14 @@ export const createAccountFeed = (options: AccountFeedOptions): AccountFeed => {
   const pendingSubscriptions = new Map<number, Watcher>();
   const subscriptionOwners = new Map<number, Watcher>();
   const pendingReadKeys = new Set<string>();
+  const expiredSubscriptions = new Set<number>();
   let link: FeedLink = { status: "idle" };
   let requestCounter = 0;
   let reconnectAttempts = 0;
   let pollTimer: Interval | null = null;
   let isReading = false;
+  let readRetry: Timeout | null = null;
+  let consecutiveReadFailures = 0;
 
   const sendRequest = (method: string, params?: unknown[]): number | null => {
     if (link.status !== "live") return null;
@@ -186,9 +193,29 @@ export const createAccountFeed = (options: AccountFeedOptions): AccountFeed => {
     const read = await readAccounts(fetchJson, options.rpcUrl, keys);
     isReading = false;
     if (readStatus() === "closed") return;
-    if (read.ok) deliverReads(read.value);
-    else console.warn(`[createAccountFeed] read failed: ${read.reason}`);
+    if (!read.ok) {
+      console.warn(`[createAccountFeed] read failed, retrying: ${read.reason}`);
+      retryFailedRead(keys);
+      return;
+    }
+    consecutiveReadFailures = 0;
+    deliverReads(read.value);
     void drainReads();
+  };
+
+  const retryFailedRead = (keys: readonly string[]) => {
+    for (const key of keys) if (watchers.has(key)) pendingReadKeys.add(key);
+    consecutiveReadFailures += 1;
+    const isReadStillNeeded = pendingReadKeys.size > 0;
+    if (link.status === "live" && isReadStillNeeded && consecutiveReadFailures >= READ_FAILURES_BEFORE_DEGRADED) {
+      console.warn("[createAccountFeed] reads keep failing, falling back to polling");
+      handleDrop();
+    }
+    if (readRetry !== null) return;
+    readRetry = setTimeout(() => {
+      readRetry = null;
+      void drainReads();
+    }, READ_RETRY_MS);
   };
 
   const requestRead = (keys: Iterable<string>) => {
@@ -208,13 +235,20 @@ export const createAccountFeed = (options: AccountFeedOptions): AccountFeed => {
     }
   };
 
+  const clearSubscribeTimers = (watcher: Watcher) => {
+    if (watcher.subscribeRetry !== null) clearTimeout(watcher.subscribeRetry);
+    if (watcher.subscribeDeadline !== null) clearTimeout(watcher.subscribeDeadline);
+    watcher.subscribeRetry = null;
+    watcher.subscribeDeadline = null;
+  };
+
   const forgetSubscriptions = () => {
     pendingSubscriptions.clear();
     subscriptionOwners.clear();
+    expiredSubscriptions.clear();
     for (const watcher of watchers.values()) {
       watcher.subscriptionId = null;
-      if (watcher.subscribeRetry !== null) clearTimeout(watcher.subscribeRetry);
-      watcher.subscribeRetry = null;
+      clearSubscribeTimers(watcher);
     }
   };
 
@@ -235,7 +269,21 @@ export const createAccountFeed = (options: AccountFeedOptions): AccountFeed => {
 
   const subscribe = (watcher: Watcher) => {
     const requestId = sendRequest("accountSubscribe", [watcher.key, { encoding: "base64", commitment: "processed" }]);
-    if (requestId !== null) pendingSubscriptions.set(requestId, watcher);
+    if (requestId === null) return;
+    pendingSubscriptions.set(requestId, watcher);
+    if (watcher.subscribeDeadline !== null) clearTimeout(watcher.subscribeDeadline);
+    watcher.subscribeDeadline = setTimeout(() => expireSubscription(requestId, watcher), SUBSCRIBE_ANSWER_TIMEOUT_MS);
+  };
+
+  const expireSubscription = (requestId: number, watcher: Watcher) => {
+    watcher.subscribeDeadline = null;
+    if (pendingSubscriptions.get(requestId) !== watcher) return;
+    pendingSubscriptions.delete(requestId);
+    expiredSubscriptions.add(requestId);
+    if (watchers.get(watcher.key) !== watcher || watcher.subscriptionId !== null) return;
+    console.warn(`[createAccountFeed] accountSubscribe for ${watcher.key} got no answer, retrying`);
+    scheduleSubscribeRetry(watcher);
+    requestRead([watcher.key]);
   };
 
   const isPendingSubscription = (watcher: Watcher): boolean => [...pendingSubscriptions.values()].includes(watcher);
@@ -251,9 +299,15 @@ export const createAccountFeed = (options: AccountFeedOptions): AccountFeed => {
   };
 
   const handleAnswer = (requestId: number, result: unknown) => {
+    if (expiredSubscriptions.delete(requestId)) {
+      if (typeof result === "number") sendRequest("accountUnsubscribe", [result]);
+      return;
+    }
     const watcher = pendingSubscriptions.get(requestId);
     if (watcher === undefined) return;
     pendingSubscriptions.delete(requestId);
+    if (watcher.subscribeDeadline !== null) clearTimeout(watcher.subscribeDeadline);
+    watcher.subscribeDeadline = null;
     const isCurrent = watchers.get(watcher.key) === watcher && watcher.subscriptionId === null;
     if (typeof result !== "number") {
       if (!isCurrent) return;
@@ -342,8 +396,7 @@ export const createAccountFeed = (options: AccountFeedOptions): AccountFeed => {
   const unwatchWatcher = (watcher: Watcher) => {
     watchers.delete(watcher.key);
     pendingReadKeys.delete(watcher.key);
-    if (watcher.subscribeRetry !== null) clearTimeout(watcher.subscribeRetry);
-    watcher.subscribeRetry = null;
+    clearSubscribeTimers(watcher);
     if (watcher.subscriptionId === null) return;
     subscriptionOwners.delete(watcher.subscriptionId);
     sendRequest("accountUnsubscribe", [watcher.subscriptionId]);
@@ -361,6 +414,7 @@ export const createAccountFeed = (options: AccountFeedOptions): AccountFeed => {
       subscriptionId: null,
       subscribeAttempts: 0,
       subscribeRetry: null,
+      subscribeDeadline: null,
       lastSlot: 0,
       lastOwnerText: null,
       lastDataBase64: null,
@@ -384,6 +438,8 @@ export const createAccountFeed = (options: AccountFeedOptions): AccountFeed => {
   const close = () => {
     if (link.status === "closed") return;
     for (const watcher of [...watchers.values()]) unwatchWatcher(watcher);
+    if (readRetry !== null) clearTimeout(readRetry);
+    readRetry = null;
     moveTo({ status: "closed" });
   };
 
