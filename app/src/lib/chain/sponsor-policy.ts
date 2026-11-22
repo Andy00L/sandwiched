@@ -27,6 +27,7 @@ type InstructionRule = {
   minimumAccounts: number;
   sponsorSlots: number[];
   walletSlot: number | null;
+  needsWalletSignature?: boolean;
   findRefusal?: (instruction: TransactionInstruction, policy: SponsorPolicy) => string | null;
   findWalletRefusal?: (instruction: TransactionInstruction, wallet: PublicKey, policy: SponsorPolicy) => string | null;
 };
@@ -115,6 +116,7 @@ const INSTRUCTION_RULES: InstructionRule[] = [
     minimumAccounts: 6,
     sponsorSlots: [0],
     walletSlot: 2,
+    needsWalletSignature: true,
     findRefusal: (instruction, policy) =>
       requireKey(instruction, 3, policy.testMint, "the token account mint") ??
       requireKey(instruction, 5, TOKEN_PROGRAM_ID, "the token program"),
@@ -170,6 +172,12 @@ const INSTRUCTION_RULES: InstructionRule[] = [
 const findRule = (instruction: TransactionInstruction): InstructionRule | undefined =>
   INSTRUCTION_RULES.find((rule) => instruction.programId.equals(rule.programId) && rule.matches(instruction));
 
+const isSignedBy = (transaction: Transaction, wallet: PublicKey): boolean => {
+  const message = attemptSync(() => transaction.compileMessage());
+  if (!message.ok) return false;
+  return message.value.accountKeys.slice(0, message.value.header.numRequiredSignatures).some((key) => key.equals(wallet));
+};
+
 export const parseSponsorRequest = (body: unknown): Result<Transaction> => {
   if (typeof body !== "object" || body === null || !("transaction" in body) || typeof body.transaction !== "string") {
     return failure("the body must be { transaction: base64 }");
@@ -205,6 +213,8 @@ export const reviewSponsoredTransaction = (transaction: Transaction, policy: Spo
   });
   const [wallet] = wallets;
   if (wallets.some((candidate) => wallet !== undefined && !candidate.equals(wallet))) return failure("a sponsored transaction acts for one wallet");
+  const unsignedRule = matched.find(({ rule }) => rule.needsWalletSignature === true && (wallet === undefined || !isSignedBy(transaction, wallet)));
+  if (unsignedRule !== undefined) return failure(`${unsignedRule.rule.label} is sponsored only when the wallet's signature is on the transaction`);
   for (const { instruction, rule } of matched) {
     if (rule.findWalletRefusal === undefined) continue;
     if (wallet === undefined) return failure(`${rule.label} needs a wallet named in the same transaction`);

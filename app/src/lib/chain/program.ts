@@ -33,7 +33,7 @@ export const createChainPrograms = (connection: Connection): ChainPrograms => ({
   session: new Program<GplSession>(gplSessionIdl as GplSession, { connection }),
 });
 
-export type SeatActor = { signer: PublicKey; wallet: PublicKey; table: PublicKey; sessionToken: PublicKey | null };
+export type SeatActor = { signer: PublicKey; wallet: PublicKey; table: PublicKey; seat: PublicKey; sessionToken: PublicKey | null };
 
 const toBN = (value: bigint): BN => new BN(value.toString());
 
@@ -99,7 +99,7 @@ export const buildFaucetInstructions = async (
 const seatActionAccounts = (actor: SeatActor) => ({
   signer: actor.signer,
   table: actor.table,
-  seat: findSeatAddress(actor.table, actor.wallet),
+  seat: actor.seat,
   sessionToken: actor.sessionToken,
 });
 
@@ -124,21 +124,15 @@ export const buildPeckInstruction = (program: SandwichProgram, actor: SeatActor)
 export const buildRaiseHandInstruction = (program: SandwichProgram, actor: SeatActor, boxIndex: number) =>
   program.methods.raiseHand(boxIndex).accountsStrict(seatActionAccounts(actor)).instruction();
 
-export const buildBuyInInstruction = (
-  program: SandwichProgram,
-  wallet: PublicKey,
-  table: PublicKey,
-  mint: PublicKey,
-  chips: bigint,
-) =>
+export const buildBuyInInstruction = (program: SandwichProgram, actor: SeatActor, mint: PublicKey, chips: bigint) =>
   program.methods
     .buyIn(toBN(chips))
     .accountsStrict({
-      wallet,
-      table,
-      seat: findSeatAddress(table, wallet),
-      walletToken: findWalletTokenAddress(wallet, mint),
-      escrowToken: findEscrowTokenAddress(table, mint),
+      wallet: actor.wallet,
+      table: actor.table,
+      seat: actor.seat,
+      walletToken: findWalletTokenAddress(actor.wallet, mint),
+      escrowToken: findEscrowTokenAddress(actor.table, mint),
       tokenProgram: TOKEN_PROGRAM_ID,
     })
     .instruction();

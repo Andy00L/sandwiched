@@ -1,9 +1,10 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import { type Connection, PublicKey } from "@solana/web3.js";
 import { Buffer } from "buffer";
-import { BASE_RPC_URL, BLOCKHASH_REFRESH_MS, ROLLUP_RPC_URL, ROLLUP_WS_URL } from "./config";
+import { BASE_RPC_URL, BLOCKHASH_REFRESH_MS, ROLLUP_RPC_URL, ROLLUP_WS_URL, RPC_REQUEST_TIMEOUT_MS } from "./config";
 import { type ChainPrograms, createChainPrograms } from "./program";
 import { type Result, attempt, attemptSync, failure, success } from "./result";
-import { BlockhashCache, type FeePayment } from "./transport";
+import { createRpcConnection } from "./rpc";
+import { type BlockhashCache, type FeePayment, createBlockhashCache } from "./transport";
 
 export type ChainClient = {
   programs: ChainPrograms;
@@ -20,14 +21,14 @@ const installBufferGlobal = (): void => {
 
 export const createChainClient = (feePayment: FeePayment): ChainClient => {
   installBufferGlobal();
-  const base = new Connection(BASE_RPC_URL, "confirmed");
-  const rollup = new Connection(ROLLUP_RPC_URL, { commitment: "processed", wsEndpoint: ROLLUP_WS_URL });
+  const base = createRpcConnection(BASE_RPC_URL, { commitment: "confirmed" });
+  const rollup = createRpcConnection(ROLLUP_RPC_URL, { commitment: "processed", wsEndpoint: ROLLUP_WS_URL });
   return {
     programs: createChainPrograms(base),
     base,
     rollup,
     rollupUrl: ROLLUP_RPC_URL,
-    rollupBlockhashes: new BlockhashCache(rollup, BLOCKHASH_REFRESH_MS),
+    rollupBlockhashes: createBlockhashCache(rollup, BLOCKHASH_REFRESH_MS),
     feePayment,
   };
 };
@@ -35,7 +36,7 @@ export const createChainClient = (feePayment: FeePayment): ChainClient => {
 export type SponsorStatus = { sponsor: PublicKey; isAccepting: boolean };
 
 export const fetchSponsorStatus = async (routeUrl: string): Promise<Result<SponsorStatus>> => {
-  const response = await attempt(() => fetch(routeUrl, { method: "GET" }));
+  const response = await attempt(() => fetch(routeUrl, { method: "GET", signal: AbortSignal.timeout(RPC_REQUEST_TIMEOUT_MS) }));
   if (!response.ok) return failure(`[fetchSponsorStatus] transport: ${response.reason}`);
   const body = await attempt((): Promise<unknown> => response.value.json());
   if (!body.ok || typeof body.value !== "object" || body.value === null) return failure("[fetchSponsorStatus] no JSON body");

@@ -1,5 +1,6 @@
 import type { PublicKey } from "@solana/web3.js";
 import type { SeatSnapshot, TableSnapshot } from "../chain/accounts";
+import { SLOT_REGRESSION_SLOTS } from "../chain/config";
 import type { RollupAck } from "../chain/transport";
 import { CHIPS_PER_ANTE, LIVE_TIMING, TICK_MS } from "./chain-rules";
 import {
@@ -12,7 +13,7 @@ import {
   type Temperament,
   type TookOffEvent,
 } from "./round-events";
-import { EMPTY_CHAIN_FRAME, deriveRoundEvents, mergeChainFrames, type ChainFrame } from "./snapshot-diff";
+import { EMPTY_CHAIN_FRAME, deriveRoundEvents, findNextDueTick, type ChainFrame } from "./snapshot-diff";
 import { createTickClock } from "./tick-clock";
 import { applyRoundEvent, createViewState, type RoundViewState } from "./view-state";
 
@@ -63,7 +64,7 @@ type PendingChange = { slot: number; arrival: number } & (
 
 type RoundState = { roundNumber: number; header: RecordedRound; events: RoundEvent[]; view: RoundViewState };
 
-type Prediction = { event: PredictedEvent; afterTick: number; expiresTick: number };
+type Prediction = { event: PredictedEvent; afterTick: number; expiresTick: number; roundNumber: number };
 
 function describeLivePlayer(seat: number): RoundPlayer {
   const baseName = PIGEON_NAMES[seat % PIGEON_NAMES.length] ?? PIGEON_NAMES[0];
@@ -76,11 +77,7 @@ function describeLivePlayer(seat: number): RoundPlayer {
   };
 }
 
-function listSeatedSeats(table: TableSnapshot): number[] {
-  return table.seats.flatMap((wallet, seat) => (wallet === null ? [] : [seat]));
-}
-
-function startRound(table: TableSnapshot, timing: RoundTiming, seatedSeats: readonly number[], tick: number): RoundState {
+function startRound(table: TableSnapshot, timing: RoundTiming): RoundState {
   const header: RecordedRound = {
     version: ROUND_SCHEMA_VERSION,
     seed: 0,
@@ -91,16 +88,55 @@ function startRound(table: TableSnapshot, timing: RoundTiming, seatedSeats: read
     players: table.seats.map((_wallet, seat) => describeLivePlayer(seat)),
     events: [],
   };
-  const events = seatedSeats.map((seat): RoundEvent => ({ tick, kind: "seatJoined", seat }));
-  return { roundNumber: Number(table.roundNumber), header, events, view: events.reduce(applyRoundEvent, createViewState(header)) };
+  return { roundNumber: Number(table.roundNumber), header, events: [], view: createViewState(header) };
+}
+
+function hasRoundActivity(table: TableSnapshot): boolean {
+  return table.antedSeatIndexes.length > 0 || table.phase.state !== "lobby";
+}
+
+function dropVacatedSeats(seats: ReadonlyMap<number, SeatSnapshot>, table: TableSnapshot): ReadonlyMap<number, SeatSnapshot> {
+  const isVacated = (seatIndex: number, seat: SeatSnapshot) => table.seats[seatIndex]?.equals(seat.wallet) !== true;
+  if (![...seats].some(([seatIndex, seat]) => isVacated(seatIndex, seat))) return seats;
+  return new Map([...seats].filter(([seatIndex, seat]) => !isVacated(seatIndex, seat)));
 }
 
 function applyChange(frame: ChainFrame, change: PendingChange): ChainFrame {
   const tick = Math.max(frame.tick, change.slot);
-  if (change.kind === "table") return { tick, table: change.snapshot, seats: frame.seats };
-  const seatIndex = change.snapshot.seatIndex;
-  if (seatIndex === null) return { ...frame, tick };
-  return { tick, table: frame.table, seats: new Map(frame.seats).set(seatIndex, change.snapshot) };
+  if (change.kind === "table") return { tick, table: change.snapshot, seats: dropVacatedSeats(frame.seats, change.snapshot) };
+  const seat = change.snapshot;
+  const seats = new Map([...frame.seats].filter(([seatIndex, held]) => seatIndex === seat.seatIndex || !held.address.equals(seat.address)));
+  if (seat.seatIndex !== null) seats.set(seat.seatIndex, seat);
+  return { tick, table: frame.table, seats };
+}
+
+function buildRoundStartFrame(applied: ChainFrame, table: TableSnapshot): ChainFrame {
+  const emptyLobby: TableSnapshot = {
+    ...table,
+    seats: table.seats.map(() => null),
+    antedSeatIndexes: [],
+    phase: { state: "lobby", firstAnteTick: 0n },
+  };
+  return { tick: applied.tick, table: emptyLobby, seats: applied.seats };
+}
+
+function buildSettledFrame(applied: ChainFrame, next: ChainFrame, roundNumber: number): ChainFrame | null {
+  const previousTable = applied.table;
+  const table = next.table;
+  if (previousTable === null || table === null || previousTable.phase.state !== "live") return null;
+  if (table.lastResult === null || Number(table.lastResult.roundNumber) !== roundNumber) return null;
+  if (!hasRoundActivity(table)) return { tick: next.tick, table, seats: next.seats };
+  const settleTick = Math.min(Math.max(Number(previousTable.round.endTick), previousTable.slot, applied.tick), next.tick);
+  const settledTable: TableSnapshot = {
+    ...previousTable,
+    slot: settleTick,
+    roundNumber: table.roundNumber,
+    antedSeatIndexes: [],
+    phase: { state: "lobby", firstAnteTick: 0n },
+    lastResult: table.lastResult,
+    round: table.phase.state === "live" ? previousTable.round : table.round,
+  };
+  return { tick: Math.max(applied.tick, settleTick), table: settledTable, seats: applied.seats };
 }
 
 function answersPrediction(prediction: Prediction, event: RoundEvent): boolean {
@@ -149,6 +185,7 @@ export function createTableStore(options: TableStoreOptions): TableStore {
   let roundState: RoundState | null = null;
   let predictions: Prediction[] = [];
   let lastRefusal: ActionRefusal | null = null;
+  let publishedLive: { from: RoundState; eventCount: number; live: LiveRound } | null = null;
   let snapshot: TableStoreSnapshot = { live: null, ownSeat: null, predicted: [], lastRefusal: null };
 
   const findOwnSeat = (): number | null => {
@@ -157,28 +194,22 @@ export function createTableStore(options: TableStoreOptions): TableStore {
     return seat === -1 ? null : seat;
   };
 
+  const readLiveRound = (): LiveRound | null => {
+    if (roundState === null) return null;
+    if (publishedLive !== null && publishedLive.from === roundState && publishedLive.eventCount === roundState.events.length) return publishedLive.live;
+    const live: LiveRound = { roundNumber: roundState.roundNumber, round: { ...roundState.header, events: [...roundState.events] }, view: roundState.view };
+    publishedLive = { from: roundState, eventCount: roundState.events.length, live };
+    return live;
+  };
+
   const publish = () => {
     snapshot = {
-      live:
-        roundState === null
-          ? null
-          : { roundNumber: roundState.roundNumber, round: { ...roundState.header, events: [...roundState.events] }, view: roundState.view },
+      live: readLiveRound(),
       ownSeat: findOwnSeat(),
       predicted: predictions.map((prediction) => prediction.event),
       lastRefusal,
     };
     for (const listener of listeners) listener();
-  };
-
-  const recordEvents = (events: readonly RoundEvent[], table: TableSnapshot) => {
-    for (const event of events) {
-      if (roundState === null) return;
-      if (event.kind === "anted" && roundState.view.phase === "settled") {
-        roundState = startRound(table, timing, listSeatedSeats(table), event.tick);
-      }
-      roundState.events.push(event);
-      roundState.view = applyRoundEvent(roundState.view, event);
-    }
   };
 
   const resolvePredictions = (events: readonly RoundEvent[]): boolean => {
@@ -191,50 +222,101 @@ export function createTableStore(options: TableStoreOptions): TableStore {
     return hasChanged;
   };
 
-  const expirePredictions = (chainTick: number): boolean => {
-    const unexpired = predictions.filter((prediction) => prediction.expiresTick >= chainTick);
-    const hasChanged = unexpired.length !== predictions.length;
-    predictions = unexpired;
+  const keepPredictions = (isKept: (prediction: Prediction) => boolean): boolean => {
+    if (predictions.length === 0) return false;
+    const kept = predictions.filter(isKept);
+    const hasChanged = kept.length !== predictions.length;
+    predictions = kept;
     return hasChanged;
   };
 
+  const recordStep = (round: RoundState, previous: ChainFrame, next: ChainFrame): boolean => {
+    const events = deriveRoundEvents(round.view, previous, next, timing);
+    for (const event of events) {
+      round.events.push(event);
+      round.view = applyRoundEvent(round.view, event);
+    }
+    applied = next;
+    return resolvePredictions(events) || events.length > 0;
+  };
+
   const stepTo = (next: ChainFrame): boolean => {
-    const merged = mergeChainFrames(applied, next);
-    const table = merged.table;
+    const table = next.table;
     if (table === null) {
-      applied = merged;
+      applied = next;
       return false;
     }
-    const isFirstSight = roundState === null;
-    const previous: ChainFrame = isFirstSight ? { tick: applied.tick, table: null, seats: new Map() } : applied;
-    const currentRound = roundState ?? startRound(table, timing, [], table.slot);
-    roundState = currentRound;
-    const events = deriveRoundEvents(currentRound.view, previous, merged, timing);
-    recordEvents(events, table);
-    const wasCancelled = roundState.roundNumber !== Number(table.roundNumber) && roundState.view.phase !== "settled";
-    if (wasCancelled) roundState = startRound(table, timing, listSeatedSeats(table), merged.tick);
-    applied = merged;
-    const hasResolved = resolvePredictions(events);
-    return isFirstSight || wasCancelled || hasResolved || events.length > 0;
+    if (roundState === null) {
+      roundState = startRound(table, timing);
+      recordStep(roundState, { tick: applied.tick, table: null, seats: new Map() }, next);
+      return true;
+    }
+    if (Number(table.roundNumber) === roundState.roundNumber) return recordStep(roundState, applied, next);
+    const settledFrame = roundState.view.phase === "settled" ? null : buildSettledFrame(applied, next, roundState.roundNumber);
+    const hasSettled = settledFrame !== null && recordStep(roundState, applied, settledFrame);
+    if (roundState.view.phase === "settled" && !hasRoundActivity(table)) {
+      applied = next;
+      return hasSettled;
+    }
+    const nextRound = startRound(table, timing);
+    roundState = nextRound;
+    recordStep(nextRound, buildRoundStartFrame(applied, table), next);
+    return true;
+  };
+
+  const advanceClockTo = (horizon: number): boolean => {
+    const dueTick = roundState === null ? null : findNextDueTick(roundState.view);
+    if (dueTick === null || dueTick > horizon) {
+      applied = { ...applied, tick: horizon };
+      return false;
+    }
+    return stepTo({ ...applied, tick: horizon });
+  };
+
+  const applyDueChanges = (horizon: number): boolean => {
+    if (pendingChanges.length === 0) return false;
+    const dueChanges = pendingChanges
+      .filter((change) => change.slot <= horizon)
+      .sort((left, right) => left.slot - right.slot || left.arrival - right.arrival);
+    if (dueChanges.length === 0) return false;
+    pendingChanges = pendingChanges.filter((change) => change.slot > horizon);
+    let hasChanged = false;
+    let frame = applied;
+    dueChanges.forEach((change, index) => {
+      frame = applyChange(frame, change);
+      if (dueChanges[index + 1]?.slot === change.slot) return;
+      hasChanged = stepTo(frame) || hasChanged;
+      frame = applied;
+    });
+    return hasChanged;
   };
 
   const advance = () => {
     const chainTick = clock.estimate(now());
     const horizon = Math.max(applied.tick, chainTick - horizonTicks);
-    const dueChanges = pendingChanges
-      .filter((change) => change.slot <= horizon)
-      .sort((left, right) => left.slot - right.slot || left.arrival - right.arrival);
-    pendingChanges = pendingChanges.filter((change) => change.slot > horizon);
-    let hasChanged = false;
-    for (const change of dueChanges) hasChanged = stepTo(applyChange(applied, change)) || hasChanged;
-    if (horizon > applied.tick) hasChanged = stepTo({ ...applied, tick: horizon }) || hasChanged;
-    hasChanged = expirePredictions(chainTick) || hasChanged;
+    let hasChanged = applyDueChanges(horizon);
+    if (horizon > applied.tick) hasChanged = advanceClockTo(horizon) || hasChanged;
+    const liveRoundNumber = roundState?.view.phase === "live" ? roundState.roundNumber : null;
+    hasChanged = keepPredictions((prediction) => prediction.roundNumber === liveRoundNumber && prediction.expiresTick >= chainTick) || hasChanged;
     if (hasChanged) publish();
+  };
+
+  const restartFromChain = () => {
+    console.warn("[createTableStore] the rollup slots went backwards, starting over from the restarted chain");
+    lastSlotByAccount.clear();
+    pendingChanges = [];
+    applied = EMPTY_CHAIN_FRAME;
+    roundState = null;
+    predictions = [];
+    clock.reset();
   };
 
   const ingest = (accountKey: string, change: PendingChange) => {
     const lastSlot = lastSlotByAccount.get(accountKey);
-    if (lastSlot !== undefined && change.slot < lastSlot) return;
+    if (lastSlot !== undefined && change.slot < lastSlot) {
+      if (lastSlot - change.slot <= SLOT_REGRESSION_SLOTS) return;
+      restartFromChain();
+    }
     lastSlotByAccount.set(accountKey, change.slot);
     clock.observe(change.slot, now());
     pendingChanges.push(change);
@@ -244,9 +326,12 @@ export function createTableStore(options: TableStoreOptions): TableStore {
   const perform = async (intent: PigeonIntent, send: () => Promise<RollupAck>): Promise<RollupAck> => {
     const seat = findOwnSeat();
     const chainTick = clock.estimate(now());
-    const predictedEvent = seat === null || roundState === null ? null : predictIntent(roundState.view, intent, seat, chainTick, timing);
+    const round = roundState;
+    const predictedEvent = seat === null || round === null ? null : predictIntent(round.view, intent, seat, chainTick, timing);
     const prediction: Prediction | null =
-      predictedEvent === null ? null : { event: predictedEvent, afterTick: applied.tick, expiresTick: chainTick + PREDICTION_TIMEOUT_TICKS };
+      predictedEvent === null || round === null
+        ? null
+        : { event: predictedEvent, afterTick: applied.tick, expiresTick: chainTick + PREDICTION_TIMEOUT_TICKS, roundNumber: round.roundNumber };
     if (prediction !== null) {
       predictions = [...predictions, prediction];
       publish();

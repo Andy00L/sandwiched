@@ -187,7 +187,7 @@ const decodeOwnedAccount = <Snapshot>(
   account: Pick<AccountInfo<Buffer>, "owner" | "data"> | null,
 ): Result<Snapshot | null> => {
   if (account === null || !account.owner.equals(SANDWICH_PROGRAM_ID)) return success(null);
-  return decode(program, address, slot, Buffer.from(account.data));
+  return decode(program, address, slot, account.data instanceof Buffer ? account.data : Buffer.from(account.data));
 };
 
 const fetchAccount = async <Snapshot>(

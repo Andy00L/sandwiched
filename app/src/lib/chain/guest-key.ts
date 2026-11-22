@@ -21,8 +21,8 @@ export const loadGuestKey = (store: KeyStore): GuestKey => {
   const storedText = store.read(GUEST_KEY_STORAGE_KEY);
   const parsed = storedText === null ? null : attemptSync((): unknown => JSON.parse(storedText));
   const stored = parsed?.ok === true ? restoreKeypair(parsed.value) : null;
-  if (stored !== null) return { keypair: stored, isNew: false, isPersisted: true };
+  if (stored !== null) return { keypair: stored, isNew: false, isPersisted: store.isDurable };
   const created = Keypair.generate();
-  const isPersisted = store.write(GUEST_KEY_STORAGE_KEY, JSON.stringify(listSecretKeyBytes(created)));
+  const isPersisted = store.write(GUEST_KEY_STORAGE_KEY, JSON.stringify(listSecretKeyBytes(created))) && store.isDurable;
   return { keypair: created, isNew: true, isPersisted };
 };

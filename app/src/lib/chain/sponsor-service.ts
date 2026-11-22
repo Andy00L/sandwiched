@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
-import { Connection, type Keypair } from "@solana/web3.js";
+import type { Connection, Keypair } from "@solana/web3.js";
 import { findTestMintAddress } from "./addresses";
 import { BASE_RPC_URL } from "./config";
 import { restoreKeypair } from "./guest-key";
-import { type RateLimits, type RateWindow, decideRate, pruneRateWindows } from "./rate-limit";
+import { type RateLimits, createRateLimiter } from "./rate-limit";
 import { type Result, attempt, attemptSync, failure, success } from "./result";
+import { createRpcConnection } from "./rpc";
+import { type BalanceReading, type SpendRule, createSpendBudget } from "./spend-budget";
 import { parseSponsorRequest, reviewSponsoredTransaction } from "./sponsor-policy";
 
 export const SPONSOR_KEYPAIR_PATH_ENV = "SANDWICH_SPONSOR_KEYPAIR_PATH";
@@ -12,11 +14,19 @@ export const SPONSOR_MIN_LAMPORTS = 200_000_000;
 export const MAX_SPONSOR_BODY_BYTES = 4_096;
 
 const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
+const LAMPORTS_PER_SOL = 1_000_000_000;
 const SPONSOR_RATE_LIMITS: RateLimits = {
   perIp: { limit: 60, windowMs: HOUR_MS },
   perWallet: { limit: 12, windowMs: HOUR_MS },
 };
-const PRUNE_ABOVE_ENTRIES = 1_000;
+const RATE_LIMIT_MAX_ENTRIES = 10_000;
+export const SPONSOR_SPEND_RULES: readonly SpendRule[] = [
+  { windowMs: HOUR_MS, limitLamports: LAMPORTS_PER_SOL },
+  { windowMs: DAY_MS, limitLamports: 5 * LAMPORTS_PER_SOL },
+];
+export const SPONSOR_RESERVED_LAMPORTS_PER_TRANSACTION = 10_000_000;
+export const SPONSOR_BALANCE_CACHE_MS = 5_000;
 
 export type SponsorReply = { status: number; body: Record<string, string | number | boolean> };
 
@@ -27,7 +37,7 @@ export type SponsorService = {
 
 const refuse = (status: number, reason: string): SponsorReply => ({ status, body: { reason } });
 
-const loadSponsorKeypair =(path: string | undefined): Result<Keypair> => {
+const loadSponsorKeypair = (path: string | undefined): Result<Keypair> => {
   if (path === undefined || path === "") return failure(`${SPONSOR_KEYPAIR_PATH_ENV} is not set`);
   const text = attemptSync(() => readFileSync(path, "utf8"));
   if (!text.ok) return failure("the sponsor keypair file cannot be read");
@@ -37,7 +47,7 @@ const loadSponsorKeypair =(path: string | undefined): Result<Keypair> => {
 };
 
 export const readClientIp = (headers: Headers): string =>
-  headers.get("x-forwarded-for")?.split(",")[0]?.trim() || headers.get("x-real-ip")?.trim() || "unknown";
+  headers.get("x-real-ip")?.trim() || headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() || "unknown";
 
 export type SponsorConnection = Pick<Connection, "getBalance" | "sendRawTransaction">;
 
@@ -47,18 +57,28 @@ export const createSponsorService = (
   readNowMs: () => number = Date.now,
 ): SponsorService => {
   const policy = { sponsor: keypair.publicKey, testMint: findTestMintAddress() };
-  const longestWindowMs = Math.max(SPONSOR_RATE_LIMITS.perIp.windowMs, SPONSOR_RATE_LIMITS.perWallet.windowMs);
-  let rateWindows = new Map<string, RateWindow>();
+  const rateLimiter = createRateLimiter(SPONSOR_RATE_LIMITS, RATE_LIMIT_MAX_ENTRIES);
+  const spendBudget = createSpendBudget(SPONSOR_SPEND_RULES, SPONSOR_RESERVED_LAMPORTS_PER_TRANSACTION);
+  let cachedBalance: BalanceReading | null = null;
+  let balanceInFlight: Promise<Result<BalanceReading>> | null = null;
 
-  const readBalance = () => attempt(() => connection.getBalance(keypair.publicKey, "confirmed"));
+  const readBalance = (): Promise<Result<BalanceReading>> => {
+    if (cachedBalance !== null && readNowMs() - cachedBalance.readAtMs < SPONSOR_BALANCE_CACHE_MS) return Promise.resolve(success(cachedBalance));
+    if (balanceInFlight !== null) return balanceInFlight;
+    balanceInFlight = attempt(() => connection.getBalance(keypair.publicKey, "confirmed")).then((read) => {
+      balanceInFlight = null;
+      if (!read.ok) return read;
+      cachedBalance = { lamports: read.value, readAtMs: readNowMs() };
+      return success(cachedBalance);
+    });
+    return balanceInFlight;
+  };
 
   const describe = async (): Promise<SponsorReply> => {
     const balance = await readBalance();
     if (!balance.ok) return refuse(502, "the sponsor balance cannot be read");
-    return {
-      status: 200,
-      body: { sponsor: keypair.publicKey.toBase58(), isAccepting: balance.value >= SPONSOR_MIN_LAMPORTS, lamports: balance.value },
-    };
+    const lamports = balance.value.lamports;
+    return { status: 200, body: { sponsor: keypair.publicKey.toBase58(), isAccepting: lamports >= SPONSOR_MIN_LAMPORTS, lamports } };
   };
 
   const sponsorTransaction = async (body: unknown, ip: string): Promise<SponsorReply> => {
@@ -67,19 +87,20 @@ export const createSponsorService = (
     const transaction = parsed.value;
     const review = reviewSponsoredTransaction(transaction, policy);
     if (!review.ok) return refuse(400, review.reason);
-    const nowMs = readNowMs();
-    if (rateWindows.size > PRUNE_ABOVE_ENTRIES) rateWindows = pruneRateWindows(rateWindows, nowMs, longestWindowMs);
-    const decision = decideRate(rateWindows, { ip, wallet: review.value.wallet?.toBase58() ?? null }, nowMs, SPONSOR_RATE_LIMITS);
+    const decision = rateLimiter.decide({ ip, wallet: review.value.wallet?.toBase58() ?? null }, readNowMs());
     if (!decision.isAllowed) {
       return { status: 429, body: { reason: `too many sponsored transactions for this ${decision.scope}`, retryAfterMs: decision.retryAfterMs } };
     }
-    rateWindows = decision.windows;
     const balance = await readBalance();
     if (!balance.ok) return refuse(502, "the sponsor balance cannot be read");
-    if (balance.value < SPONSOR_MIN_LAMPORTS) return refuse(503, "the sponsor is low on SOL, connect a wallet");
+    if (balance.value.lamports < SPONSOR_MIN_LAMPORTS) return refuse(503, "the sponsor is low on SOL, connect a wallet");
+    const budget = spendBudget.decide(balance.value, readNowMs());
+    if (!budget.isAllowed) {
+      return { status: 503, body: { reason: "the sponsor spent its budget for now, connect a wallet", retryAfterMs: budget.retryAfterMs } };
+    }
     const signed = attemptSync(() => transaction.partialSign(keypair));
     if (!signed.ok || !transaction.verifySignatures()) return refuse(400, "the transaction is missing a signature or carries an invalid one");
-    const sent = await attempt(() => connection.sendRawTransaction(transaction.serialize(), { preflightCommitment: "confirmed" }));
+    const sent = await attempt(() => connection.sendRawTransaction(transaction.serialize({ verifySignatures: false }), { preflightCommitment: "confirmed" }));
     if (!sent.ok) return refuse(502, `the transaction failed preflight: ${sent.reason.slice(0, 300)}`);
     console.log(`[sponsorTransaction] ${review.value.labels.join("+")} for ${review.value.wallet?.toBase58() ?? "no wallet"}: ${sent.value}`);
     return { status: 200, body: { signature: sent.value } };
@@ -94,6 +115,6 @@ export const resolveSponsorService = (): Result<SponsorService> => {
   if (cachedService !== null) return success(cachedService);
   const keypair = loadSponsorKeypair(process.env[SPONSOR_KEYPAIR_PATH_ENV]);
   if (!keypair.ok) return failure(`[resolveSponsorService] ${keypair.reason}`);
-  cachedService = createSponsorService(keypair.value, new Connection(BASE_RPC_URL, "confirmed"));
+  cachedService = createSponsorService(keypair.value, createRpcConnection(BASE_RPC_URL, { commitment: "confirmed" }));
   return success(cachedService);
 };

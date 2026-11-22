@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createFakeChain, ingestChange, type SwatLandingMode } from "../../../tests/fake-chain";
-import { LIVE_TIMING } from "./chain-rules";
+import { coalesceChanges, createFakeChain, ingestChange, type ChainChange, type SwatLandingMode } from "../../../tests/fake-chain";
+import { LIVE_TIMING, TICK_MS } from "./chain-rules";
 import { parseRecordedRound, type RecordedRound, type RoundEvent } from "./round-events";
 import { createTableStore } from "./table-store";
 
 const ROUNDS_DIRECTORY = join(import.meta.dir, "../../../tests/rounds");
 const EXACT_ROUND_FILES = ["duel.json", "whale-keeps.json", "pigeons-feast.json"];
 const OWED_CRUMB_ROUND_FILES = ["balanced.json", "crowd.json"];
+const POLL_WINDOW_TICKS = 250;
+const HORIZON_TICKS = 10;
 
 const ROUNDS = new Map(
   [...EXACT_ROUND_FILES, ...OWED_CRUMB_ROUND_FILES].flatMap((fileName): [string, RecordedRound][] => {
@@ -85,4 +87,37 @@ describe("the chain adapter against the recorded rounds", () => {
       expect(view?.looseCrumbs).toEqual(chain.table().round.looseCrumbs.map(Number));
     },
   );
+});
+
+describe("the chain adapter against coalesced snapshots", () => {
+  test.each([...ROUNDS.keys()])("%s: reading every 250 ticks still settles with the chain's split and every pigeon's beak", (fileName) => {
+    const round = ROUNDS.get(fileName);
+    expect(round).toBeDefined();
+    if (round === undefined) return;
+    const chain = createFakeChain(round, "lazy");
+    let nowMs = 0;
+    const store = createTableStore({ ownWallet: null, horizonTicks: HORIZON_TICKS, now: () => nowMs });
+    let windowChanges: ChainChange[] = [];
+    let windowEndTick = POLL_WINDOW_TICKS;
+    const flushWindow = () => {
+      nowMs = windowEndTick * TICK_MS;
+      for (const change of coalesceChanges(windowChanges, windowEndTick)) ingestChange(store, change);
+      nowMs += 2 * HORIZON_TICKS * TICK_MS;
+      store.advance();
+      windowChanges = [];
+    };
+    for (const event of round.events) {
+      if (event.tick >= windowEndTick) {
+        flushWindow();
+        windowEndTick = (Math.floor(event.tick / POLL_WINDOW_TICKS) + 1) * POLL_WINDOW_TICKS;
+      }
+      windowChanges.push(...chain.apply(event));
+    }
+    flushWindow();
+    const recordedSettle = round.events.at(-1);
+    expect(recordedSettle?.kind).toBe("settled");
+    if (recordedSettle?.kind !== "settled") return;
+    const { kind, whaleCrumbs, pigeonCrumbs, beaks } = recordedSettle;
+    expect(store.getSnapshot().live?.round.events.at(-1)).toMatchObject({ kind, whaleCrumbs, pigeonCrumbs, beaks });
+  });
 });

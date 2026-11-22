@@ -3,7 +3,7 @@ import type { SeatSnapshot, TableSnapshot } from "../chain/accounts";
 import { buildRoundSnapshot, buildSeatSnapshot, buildTableSnapshot, findTestWallet } from "../../../tests/fake-chain";
 import { LIVE_TIMING } from "./chain-rules";
 import type { RecordedRound, RoundEvent } from "./round-events";
-import { EMPTY_CHAIN_FRAME, deriveRoundEvents, mergeChainFrames, type ChainFrame } from "./snapshot-diff";
+import { EMPTY_CHAIN_FRAME, deriveRoundEvents, type ChainFrame } from "./snapshot-diff";
 import { applyRoundEvent, createViewState, type RoundViewState } from "./view-state";
 
 const START_TICK = 100;
@@ -101,15 +101,10 @@ describe("deriveRoundEvents for pigeon moves", () => {
     ]);
   });
 
-  test("a delivery older than the snapshot already applied for that seat changes nothing", () => {
+  test("a seat snapshot equal to the one already applied changes nothing", () => {
     const newer = buildSeatSnapshot(1, { slot: 200, pigeon: { state: "flying", box: 0, landsTick: 250n } });
-    const older = buildSeatSnapshot(1, { slot: 150, pigeon: { state: "hovering" } });
     const history: RoundEvent[] = [{ tick: 200, kind: "flew", seat: 1, box: 0, landsTick: 250 }];
-    const previous = buildFrame(210, LIVE_TABLE, [newer]);
-    const stale = buildFrame(210, LIVE_TABLE, [older]);
-    expect(deriveEvents(history, previous, stale)).toEqual([]);
-    expect(mergeChainFrames(previous, stale).seats.get(1)).toBe(newer);
-    expect(deriveEvents(history, previous, buildFrame(210, LIVE_TABLE, [{ ...newer }]))).toEqual([]);
+    expect(deriveEvents(history, buildFrame(210, LIVE_TABLE, [newer]), buildFrame(210, LIVE_TABLE, [{ ...newer }]))).toEqual([]);
   });
 });
 
@@ -240,5 +235,50 @@ describe("deriveRoundEvents for the whale", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("deriveRoundEvents with coalesced snapshots", () => {
+  test("two swats raised and landed between two snapshots land one after the other", () => {
+    const history: RoundEvent[] = [
+      ...PERCHED_ON_SANDWICH,
+      { tick: 160, kind: "pecked", seat: 1, box: SANDWICH_BOX, outcome: "sandwichCrumb" },
+      { tick: 190, kind: "pecked", seat: 1, box: SANDWICH_BOX, outcome: "sandwichCrumb" },
+      { tick: 220, kind: "pecked", seat: 1, box: SANDWICH_BOX, outcome: "sandwichCrumb" },
+    ];
+    const pigeon = buildSeatSnapshot(1, { slot: 220, pigeon: { state: "perched", box: SANDWICH_BOX }, beakCrumbs: 3n, nextPeckTick: 250n });
+    const firstLands = 300 + LIVE_TIMING.swatWindupTicks;
+    const secondLands = 420 + LIVE_TIMING.swatWindupTicks;
+    const twoSwats: TableSnapshot = {
+      ...LIVE_TABLE,
+      slot: 470,
+      round: {
+        ...LIVE_TABLE.round,
+        swats: [
+          { number: 1n, box: SANDWICH_BOX, landsTick: BigInt(firstLands) },
+          { number: 2n, box: SANDWICH_BOX, landsTick: BigInt(secondLands) },
+        ],
+        swatCount: 2n,
+      },
+    };
+    const events = deriveEvents(history, buildFrame(460, LIVE_TABLE, [pigeon]), buildFrame(470, twoSwats, [pigeon]));
+    const landings = events.filter((event) => event.kind === "swatLanded");
+    expect(landings.map((event) => event.kind === "swatLanded" && event.swatNumber)).toEqual([1, 2]);
+    expect(landings[0]).toMatchObject({ hits: [{ seat: 1, droppedCrumbs: 2 }] });
+  });
+
+  test("settle takes each pigeon's beak from its seat snapshot when pecks were coalesced", () => {
+    const history: RoundEvent[] = [...PERCHED_ON_SANDWICH, { tick: 170, kind: "pecked", seat: 1, box: SANDWICH_BOX, outcome: "sandwichCrumb" }];
+    const twicePecked = buildSeatSnapshot(1, { slot: 200, pigeon: { state: "perched", box: SANDWICH_BOX }, beakCrumbs: 2n, nextPeckTick: 230n });
+    const settledTable = buildTableSnapshot({
+      ...LIVE_TABLE,
+      slot: END_TICK,
+      roundNumber: 1n,
+      antedSeatIndexes: [],
+      phase: { state: "lobby", firstAnteTick: 0n },
+      lastResult: { roundNumber: 0n, whaleWallet: findTestWallet(0), sandwichBox: SANDWICH_BOX, whaleCrumbs: 298n, pigeonCrumbs: 2n },
+    });
+    const events = deriveEvents(history, buildFrame(END_TICK - 5, LIVE_TABLE, [twicePecked]), buildFrame(END_TICK, settledTable, [twicePecked]));
+    expect(events.at(-1)).toMatchObject({ kind: "settled", beaks: [{ seat: 1, crumbs: 2 }, { seat: 2, crumbs: 0 }] });
   });
 });

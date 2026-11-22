@@ -2,6 +2,8 @@ import { connection } from "next/server";
 import { attempt, attemptSync } from "@/lib/chain/result";
 import { MAX_SPONSOR_BODY_BYTES, readClientIp, resolveSponsorService } from "@/lib/chain/sponsor-service";
 
+const refuseOversizedBody = () => Response.json({ reason: "the body is unreadable or too large" }, { status: 413 });
+
 export async function GET() {
   await connection();
   const service = resolveSponsorService();
@@ -14,13 +16,15 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const declaredBytes = Number(request.headers.get("content-length") ?? 0);
+  if (!Number.isFinite(declaredBytes) || declaredBytes > MAX_SPONSOR_BODY_BYTES) return refuseOversizedBody();
   const service = resolveSponsorService();
   if (!service.ok) {
     console.error(`[POST /api/sponsor] ${service.reason}`);
     return Response.json({ reason: "the sponsor is not configured" }, { status: 503 });
   }
   const text = await attempt(() => request.text());
-  if (!text.ok || text.value.length > MAX_SPONSOR_BODY_BYTES) return Response.json({ reason: "the body is unreadable or too large" }, { status: 413 });
+  if (!text.ok || text.value.length > MAX_SPONSOR_BODY_BYTES) return refuseOversizedBody();
   const body = attemptSync((): unknown => JSON.parse(text.value));
   if (!body.ok) return Response.json({ reason: "the body is not JSON" }, { status: 400 });
   const reply = await service.value.sponsor(body.value, readClientIp(request.headers));

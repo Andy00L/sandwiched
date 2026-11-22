@@ -32,17 +32,27 @@ export const attemptSync = <Value>(operation: () => Value): Result<Value> => {
 
 export const sleep = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+export const raceDeadline = <Value>(pending: Promise<Result<Value>>, timeoutMs: number, label: string): Promise<Result<Value>> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<Result<Value>>((resolve) => {
+    timer = setTimeout(() => resolve(failure(`[raceDeadline] ${label} took longer than ${Math.round(timeoutMs)} ms`)), Math.max(0, timeoutMs));
+  });
+  return Promise.race([pending, expired]).finally(() => clearTimeout(timer));
+};
+
 export const pollUntil = async <Value>(
   label: string,
   probe: () => Promise<Value | null>,
   timeoutMs: number,
   intervalMs: number,
 ): Promise<Result<Value>> => {
-  const startedAt = performance.now();
-  while (performance.now() - startedAt < timeoutMs) {
-    const probed = await attempt(probe);
+  const deadlineMs = performance.now() + timeoutMs;
+  const readRemainingMs = () => deadlineMs - performance.now();
+  while (readRemainingMs() > 0) {
+    const probed = await raceDeadline(attempt(probe), readRemainingMs(), label);
     if (probed.ok && probed.value !== null) return success(probed.value);
-    await sleep(intervalMs);
+    if (readRemainingMs() <= 0) break;
+    await sleep(Math.min(intervalMs, readRemainingMs()));
   }
   return failure(`[pollUntil] ${label} not observed within ${timeoutMs} ms`);
 };

@@ -108,6 +108,27 @@ export function ingestChange(store: TableStore, change: ChainChange): void {
   else store.ingestSeat(change.snapshot);
 }
 
+function nameChangedAccount(change: ChainChange): string {
+  return change.kind === "table" ? "table" : `seat:${change.snapshot.address.toBase58()}`;
+}
+
+function stampReadSlot(change: ChainChange, readSlot: number): ChainChange {
+  return change.kind === "table"
+    ? { kind: "table", snapshot: { ...change.snapshot, slot: readSlot } }
+    : { kind: "seat", snapshot: { ...change.snapshot, slot: readSlot } };
+}
+
+export function coalesceChanges(changes: readonly ChainChange[], readSlot: number | null = null): ChainChange[] {
+  const latestByAccount = new Map<string, ChainChange>();
+  for (const change of changes) {
+    const account = nameChangedAccount(change);
+    latestByAccount.delete(account);
+    latestByAccount.set(account, change);
+  }
+  const latest = [...latestByAccount.values()];
+  return readSlot === null ? latest : latest.map((change) => stampReadSlot(change, readSlot));
+}
+
 function isSamePigeon(left: ChainPigeon, right: ChainPigeon): boolean {
   return left.beakCrumbs === right.beakCrumbs && left.lastSwatNumber === right.lastSwatNumber && Bun.deepEquals(left.pigeon, right.pigeon);
 }

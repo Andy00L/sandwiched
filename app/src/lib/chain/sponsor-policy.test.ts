@@ -14,7 +14,7 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { Buffer } from "buffer";
-import { findSessionTokenAddress, findTableAddress, findTestMintAddress } from "./addresses";
+import { findSeatAddress, findSessionTokenAddress, findTableAddress, findTestMintAddress } from "./addresses";
 import { SANDWICH_PROGRAM_ID } from "./config";
 import {
   buildCashOutInstruction,
@@ -133,7 +133,7 @@ describe("reviewSponsoredTransaction refuses", () => {
   });
 
   test("a player action of the program that is not on the allowlist", async () => {
-    const actor = { signer: guest.publicKey, wallet: guest.publicKey, table, sessionToken: null };
+    const actor = { signer: guest.publicKey, wallet: guest.publicKey, table, seat: findSeatAddress(table, guest.publicKey), sessionToken: null };
     const cashOut = await buildCashOutInstruction(programs.sandwich, actor, testMint, 10n);
     expectRefused(buildTransaction(sponsor.publicKey, [cashOut]), "not on the allowlist");
   });
@@ -155,6 +155,12 @@ describe("reviewSponsoredTransaction refuses", () => {
     expectRefused(buildTransaction(sponsor.publicKey, [createOther]), "mint");
     const deposit = await delegateSpl(guest.publicKey, otherMint, 1_000_000n, { validator, payer: sponsor.publicKey, shuttleId: 7 });
     expectRefused(buildTransaction(sponsor.publicKey, deposit), "mint");
+  });
+
+  test("a test USDC token account the wallet does not sign for, since its owner could close it and keep the rent", () => {
+    const guestToken = getAssociatedTokenAddressSync(testMint, guest.publicKey);
+    const create = createAssociatedTokenAccountIdempotentInstruction(sponsor.publicKey, guestToken, guest.publicKey, testMint);
+    expectRefused(buildTransaction(sponsor.publicKey, [create]), "signature");
   });
 
   test("a priority fee or a compute limit above the base budget", () => {

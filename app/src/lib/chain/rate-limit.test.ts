@@ -1,58 +1,51 @@
 import { describe, expect, test } from "bun:test";
-import { type RateLimits, type RateWindow, decideRate, pruneRateWindows } from "./rate-limit";
+import { type RateLimiter, type RateLimits, type RateRequest, createRateLimiter } from "./rate-limit";
 
 const LIMITS: RateLimits = { perIp: { limit: 3, windowMs: 1_000 }, perWallet: { limit: 2, windowMs: 5_000 } };
+const ROOMY_ENTRY_CAP = 100;
 
-const sendRequests = (count: number, request: { ip: string; wallet: string | null }, nowMs: number, start = new Map<string, RateWindow>()) => {
-  let windows = start;
-  const verdicts: boolean[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const decision = decideRate(windows, request, nowMs, LIMITS);
-    verdicts.push(decision.isAllowed);
-    if (decision.isAllowed) windows = decision.windows;
-  }
-  return { verdicts, windows };
-};
+const sendRequests = (limiter: RateLimiter, count: number, request: RateRequest, nowMs: number) =>
+  Array.from({ length: count }, () => limiter.decide(request, nowMs).isAllowed);
 
-describe("decideRate", () => {
+describe("createRateLimiter", () => {
   test("allows an IP up to its limit, refuses the next with the time left, and allows it again after the window", () => {
-    const { verdicts, windows } = sendRequests(4, { ip: "1.1.1.1", wallet: null }, 10_000);
-    expect(verdicts).toEqual([true, true, true, false]);
-    const refused = decideRate(windows, { ip: "1.1.1.1", wallet: null }, 10_400, LIMITS);
-    expect(refused).toEqual({ isAllowed: false, scope: "ip", retryAfterMs: 600 });
-    expect(decideRate(windows, { ip: "1.1.1.1", wallet: null }, 11_000, LIMITS).isAllowed).toBe(true);
+    const limiter = createRateLimiter(LIMITS, ROOMY_ENTRY_CAP);
+    expect(sendRequests(limiter, 4, { ip: "1.1.1.1", wallet: null }, 10_000)).toEqual([true, true, true, false]);
+    expect(limiter.decide({ ip: "1.1.1.1", wallet: null }, 10_400)).toEqual({ isAllowed: false, scope: "ip", retryAfterMs: 600 });
+    expect(limiter.decide({ ip: "1.1.1.1", wallet: null }, 11_000).isAllowed).toBe(true);
   });
 
   test("limits a wallet across IPs", () => {
-    let windows = new Map<string, RateWindow>();
+    const limiter = createRateLimiter(LIMITS, ROOMY_ENTRY_CAP);
     const verdicts = ["1.1.1.1", "2.2.2.2", "3.3.3.3"].map((ip) => {
-      const decision = decideRate(windows, { ip, wallet: "guest" }, 10_000, LIMITS);
-      if (decision.isAllowed) windows = decision.windows;
+      const decision = limiter.decide({ ip, wallet: "guest" }, 10_000);
       return decision.isAllowed ? "allowed" : decision.scope;
     });
     expect(verdicts).toEqual(["allowed", "allowed", "wallet"]);
   });
 
   test("keeps separate counts for separate IPs and wallets", () => {
-    const first = sendRequests(3, { ip: "1.1.1.1", wallet: null }, 10_000);
-    const second = sendRequests(1, { ip: "2.2.2.2", wallet: "other" }, 10_000, first.windows);
-    expect(second.verdicts).toEqual([true]);
+    const limiter = createRateLimiter(LIMITS, ROOMY_ENTRY_CAP);
+    sendRequests(limiter, 3, { ip: "1.1.1.1", wallet: null }, 10_000);
+    expect(sendRequests(limiter, 1, { ip: "2.2.2.2", wallet: "other" }, 10_000)).toEqual([true]);
   });
 
-  test("does not count a refused request", () => {
-    const { windows } = sendRequests(3, { ip: "1.1.1.1", wallet: null }, 10_000);
-    const afterRefusals = sendRequests(5, { ip: "1.1.1.1", wallet: null }, 10_100, windows);
-    expect(afterRefusals.verdicts).toEqual([false, false, false, false, false]);
-    expect(afterRefusals.windows.get("ip:1.1.1.1")).toEqual({ startedAtMs: 10_000, count: 3 });
+  test("does not count a refused request, so the window still ends where it started", () => {
+    const limiter = createRateLimiter(LIMITS, ROOMY_ENTRY_CAP);
+    sendRequests(limiter, 3, { ip: "1.1.1.1", wallet: null }, 10_000);
+    expect(sendRequests(limiter, 5, { ip: "1.1.1.1", wallet: null }, 10_900)).toEqual([false, false, false, false, false]);
+    expect(sendRequests(limiter, 3, { ip: "1.1.1.1", wallet: null }, 11_000)).toEqual([true, true, true]);
   });
-});
 
-describe("pruneRateWindows", () => {
-  test("drops windows older than the longest rule and keeps the rest", () => {
-    const windows = new Map<string, RateWindow>([
-      ["ip:old", { startedAtMs: 0, count: 3 }],
-      ["ip:recent", { startedAtMs: 9_000, count: 1 }],
-    ]);
-    expect([...pruneRateWindows(windows, 10_000, 5_000).keys()]).toEqual(["ip:recent"]);
+  test("drops expired windows first and never holds more entries than its cap", () => {
+    const limiter = createRateLimiter(LIMITS, 4);
+    sendRequests(limiter, 1, { ip: "1.1.1.1", wallet: "old" }, 0);
+    sendRequests(limiter, 3, { ip: "2.2.2.2", wallet: null }, 9_000);
+    expect(limiter.countEntries()).toBe(3);
+    expect(sendRequests(limiter, 1, { ip: "3.3.3.3", wallet: "new" }, 9_500)).toEqual([true]);
+    expect(limiter.countEntries()).toBe(3);
+    expect(limiter.decide({ ip: "2.2.2.2", wallet: null }, 9_500).isAllowed).toBe(false);
+    for (let index = 0; index < 20; index += 1) limiter.decide({ ip: `10.0.0.${index}`, wallet: `wallet-${index}` }, 9_600);
+    expect(limiter.countEntries()).toBeLessThanOrEqual(4);
   });
 });

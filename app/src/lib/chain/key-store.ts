@@ -1,9 +1,11 @@
 import { attemptSync } from "./result";
 
 export type KeyStore = {
+  isDurable: boolean;
   read: (key: string) => string | null;
   write: (key: string, value: string) => boolean;
-  remove: (key: string) => void;
+  remove: (key: string) => boolean;
+  listKeys: (prefix: string) => string[];
 };
 
 const findBrowserStorage = (): Storage | null => {
@@ -11,7 +13,11 @@ const findBrowserStorage = (): Storage | null => {
   return found.ok ? found.value : null;
 };
 
+const listStorageKeys = (storage: Storage): string[] =>
+  Array.from({ length: storage.length }, (_unused, index) => storage.key(index)).filter((key) => key !== null);
+
 export const createBrowserKeyStore = (): KeyStore => ({
+  isDurable: true,
   read: (key) => {
     const storage = findBrowserStorage();
     if (storage === null) return null;
@@ -24,13 +30,20 @@ export const createBrowserKeyStore = (): KeyStore => ({
   },
   remove: (key) => {
     const storage = findBrowserStorage();
-    if (storage !== null) attemptSync(() => storage.removeItem(key));
+    return storage !== null && attemptSync(() => storage.removeItem(key)).ok;
+  },
+  listKeys: (prefix) => {
+    const storage = findBrowserStorage();
+    if (storage === null) return [];
+    const listed = attemptSync(() => listStorageKeys(storage).filter((key) => key.startsWith(prefix)));
+    return listed.ok ? listed.value : [];
   },
 });
 
 export const createMemoryKeyStore = (): KeyStore => {
   const values = new Map<string, string>();
   return {
+    isDurable: false,
     read: (key) => values.get(key) ?? null,
     write: (key, value) => {
       values.set(key, value);
@@ -38,6 +51,8 @@ export const createMemoryKeyStore = (): KeyStore => {
     },
     remove: (key) => {
       values.delete(key);
+      return true;
     },
+    listKeys: (prefix) => [...values.keys()].filter((key) => key.startsWith(prefix)),
   };
 };

@@ -3,7 +3,14 @@ import { Connection, Keypair, SystemProgram, Transaction } from "@solana/web3.js
 import { Buffer } from "buffer";
 import { findTableAddress } from "./addresses";
 import { buildSitInstructions, createChainPrograms } from "./program";
-import { SPONSOR_MIN_LAMPORTS, type SponsorConnection, createSponsorService, readClientIp } from "./sponsor-service";
+import {
+  SPONSOR_BALANCE_CACHE_MS,
+  SPONSOR_MIN_LAMPORTS,
+  SPONSOR_SPEND_RULES,
+  type SponsorConnection,
+  createSponsorService,
+  readClientIp,
+} from "./sponsor-service";
 
 const programs = createChainPrograms(new Connection("http://127.0.0.1:8899"));
 const sponsor = Keypair.generate();
@@ -75,10 +82,51 @@ describe("createSponsorService", () => {
   });
 });
 
+describe("createSponsorService spending", () => {
+  const [hourlyRule] = SPONSOR_SPEND_RULES;
+  const hourlyLimit = hourlyRule?.limitLamports ?? 0;
+
+  test("stops co-signing once the sponsor's balance fell by the hourly budget, and signs nothing more", async () => {
+    const startLamports = 100 * SPONSOR_MIN_LAMPORTS;
+    let lamports = startLamports;
+    let nowMs = 0;
+    const stub = createStubConnection(0);
+    const connection: SponsorConnection = { ...stub.connection, getBalance: async () => lamports };
+    const service = createSponsorService(sponsor, connection, () => nowMs);
+    expect((await service.sponsor(await encodeSit(Keypair.generate()), "1.1.1.1")).status).toBe(200);
+
+    lamports = startLamports - hourlyLimit;
+    nowMs += SPONSOR_BALANCE_CACHE_MS;
+    const refused = await service.sponsor(await encodeSit(Keypair.generate()), "2.2.2.2");
+    expect(refused.status).toBe(503);
+    expect(stub.sent).toHaveLength(1);
+  });
+
+  test("reads the balance once per cache period", async () => {
+    let balanceReads = 0;
+    let nowMs = 0;
+    const stub = createStubConnection(0);
+    const connection: SponsorConnection = {
+      ...stub.connection,
+      getBalance: async () => {
+        balanceReads += 1;
+        return 10 * SPONSOR_MIN_LAMPORTS;
+      },
+    };
+    const service = createSponsorService(sponsor, connection, () => nowMs);
+    for (let index = 0; index < 3; index += 1) await service.sponsor(await encodeSit(Keypair.generate()), `10.0.0.${index}`);
+    await service.describe();
+    expect(balanceReads).toBe(1);
+    nowMs += SPONSOR_BALANCE_CACHE_MS;
+    await service.describe();
+    expect(balanceReads).toBe(2);
+  });
+});
+
 describe("readClientIp", () => {
-  test("takes the first forwarded address, then the real IP header, then a shared bucket", () => {
-    expect(readClientIp(new Headers({ "x-forwarded-for": "203.0.113.7, 10.0.0.1" }))).toBe("203.0.113.7");
-    expect(readClientIp(new Headers({ "x-real-ip": "198.51.100.2" }))).toBe("198.51.100.2");
+  test("trusts the Vercel proxy's x-real-ip, then the last forwarded hop, and ignores a client-written first hop", () => {
+    expect(readClientIp(new Headers({ "x-forwarded-for": "203.0.113.7, 10.0.0.1", "x-real-ip": "198.51.100.2" }))).toBe("198.51.100.2");
+    expect(readClientIp(new Headers({ "x-forwarded-for": "203.0.113.7, 10.0.0.1" }))).toBe("10.0.0.1");
     expect(readClientIp(new Headers())).toBe("unknown");
   });
 });

@@ -1,4 +1,5 @@
 import type { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { findSeatAddress } from "./addresses";
 import type { ChainClient } from "./client";
 import {
   type SeatActor,
@@ -17,13 +18,14 @@ import {
   buildStartRoundInstruction,
   buildTakeOffInstruction,
 } from "./program";
-import { type Result, attempt, failure } from "./result";
-import type { SessionKey } from "./session";
+import { type Result, attempt, failure, success } from "./result";
+import type { SessionKeeper } from "./session";
 import {
   type BaseSend,
   type RollupAck,
   type TransactionSigner,
   createKeypairSigner,
+  refuseLocally,
   resolveFeePayer,
   sendOnBase,
   sendOnRollup,
@@ -77,37 +79,46 @@ export type SeatActionsSetup = {
   table: PublicKey;
   mint: PublicKey;
   wallet: TransactionSigner;
-  session: SessionKey | null;
+  sessions: SessionKeeper | null;
 };
 
-export const createSeatActions = ({ client, table, mint, wallet, session }: SeatActionsSetup): SeatActions => {
+type ResolvedActor = { signer: TransactionSigner; actor: SeatActor };
+
+export const createSeatActions = ({ client, table, mint, wallet, sessions }: SeatActionsSetup): SeatActions => {
   const program = client.programs.sandwich;
-  const actionSigner = session === null ? wallet : createKeypairSigner(session.signer);
-  const actor: SeatActor = {
-    signer: actionSigner.publicKey,
-    wallet: wallet.publicKey,
-    table,
-    sessionToken: session?.token ?? null,
+  const walletActor: SeatActor = { signer: wallet.publicKey, wallet: wallet.publicKey, table, seat: findSeatAddress(table, wallet.publicKey), sessionToken: null };
+
+  const resolveSessionActor = async (): Promise<Result<ResolvedActor>> => {
+    if (sessions === null) return success({ signer: wallet, actor: walletActor });
+    const session = await sessions.resolve();
+    if (!session.ok) return failure(`[createSeatActions] no usable session: ${session.reason}`);
+    const signer = createKeypairSigner(session.value.signer);
+    return success({ signer, actor: { ...walletActor, signer: signer.publicKey, sessionToken: session.value.token } });
   };
-  const send = async (build: () => Promise<TransactionInstruction>, signer: TransactionSigner): Promise<RollupAck> => {
-    const instruction = await attempt(build);
-    if (!instruction.ok) {
-      return { ok: false, kind: "client", errorCode: null, errorName: "client", detail: instruction.reason, ackMs: 0 };
-    }
-    return sendOnRollup(client.rollupUrl, client.rollupBlockhashes, [instruction.value], [signer]);
+
+  const send = async (resolveActor: () => Promise<Result<ResolvedActor>>, build: (actor: SeatActor) => Promise<TransactionInstruction>) => {
+    const resolved = await resolveActor();
+    if (!resolved.ok) return refuseLocally(resolved.reason);
+    const instruction = await attempt(() => build(resolved.value.actor));
+    if (!instruction.ok) return refuseLocally(instruction.reason);
+    return sendOnRollup(client.rollupUrl, client.rollupBlockhashes, [instruction.value], [resolved.value.signer]);
   };
+  const sendAsSession = (build: (actor: SeatActor) => Promise<TransactionInstruction>) => send(resolveSessionActor, build);
+  const sendAsWallet = (build: (actor: SeatActor) => Promise<TransactionInstruction>) =>
+    send(async () => success({ signer: wallet, actor: walletActor }), build);
+
   return {
-    join: () => send(() => buildJoinInstruction(program, actor), actionSigner),
-    leave: () => send(() => buildLeaveInstruction(program, actor), actionSigner),
-    ante: () => send(() => buildAnteInstruction(program, actor), actionSigner),
-    flyTo: (boxIndex) => send(() => buildFlyToInstruction(program, actor, boxIndex), actionSigner),
-    takeOff: () => send(() => buildTakeOffInstruction(program, actor), actionSigner),
-    peck: () => send(() => buildPeckInstruction(program, actor), actionSigner),
-    raiseHand: (boxIndex) => send(() => buildRaiseHandInstruction(program, actor, boxIndex), actionSigner),
-    buyIn: (chips) => send(() => buildBuyInInstruction(program, wallet.publicKey, table, mint, chips), wallet),
-    cashOut: (chips) => send(() => buildCashOutInstruction(program, actor, mint, chips), actionSigner),
-    startRound: () => send(() => buildStartRoundInstruction(program, actionSigner.publicKey, table), actionSigner),
-    landSwat: (seats) => send(() => buildLandSwatInstruction(program, table, seats), actionSigner),
-    settle: (seats) => send(() => buildSettleInstruction(program, table, seats), actionSigner),
+    join: () => sendAsSession((actor) => buildJoinInstruction(program, actor)),
+    leave: () => sendAsSession((actor) => buildLeaveInstruction(program, actor)),
+    ante: () => sendAsSession((actor) => buildAnteInstruction(program, actor)),
+    flyTo: (boxIndex) => sendAsSession((actor) => buildFlyToInstruction(program, actor, boxIndex)),
+    takeOff: () => sendAsSession((actor) => buildTakeOffInstruction(program, actor)),
+    peck: () => sendAsSession((actor) => buildPeckInstruction(program, actor)),
+    raiseHand: (boxIndex) => sendAsSession((actor) => buildRaiseHandInstruction(program, actor, boxIndex)),
+    buyIn: (chips) => sendAsWallet((actor) => buildBuyInInstruction(program, actor, mint, chips)),
+    cashOut: (chips) => sendAsSession((actor) => buildCashOutInstruction(program, actor, mint, chips)),
+    startRound: () => sendAsSession((actor) => buildStartRoundInstruction(program, actor.signer, table)),
+    landSwat: (seats) => sendAsSession(() => buildLandSwatInstruction(program, table, seats)),
+    settle: (seats) => sendAsSession(() => buildSettleInstruction(program, table, seats)),
   };
 };

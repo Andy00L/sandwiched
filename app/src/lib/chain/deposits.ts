@@ -13,54 +13,171 @@ import { findWalletTokenAddress } from "./addresses";
 import type { ChainClient } from "./client";
 import type { KeyStore } from "./key-store";
 import { type Result, attempt, attemptSync, failure, pollUntil, success } from "./result";
-import { type TransactionSigner, readTokenUnits, resolveFeePayer, sendOnBase, sendOnRollup } from "./transport";
+import {
+  type BaseConfirmation,
+  type BaseSubmission,
+  type RollupAck,
+  type TransactionSigner,
+  confirmOnBase,
+  readTokenAccountUnits,
+  readTokenUnits,
+  resolveFeePayer,
+  sendOnBase,
+  sendOnRollup,
+  submitOnBase,
+} from "./transport";
 
-const PENDING_DEPOSITS_PREFIX = "sandwich.pending-deposits.v1.";
+const DEPOSIT_KEY_PREFIX = "sandwich.deposit.v2.";
 const DEPOSIT_LANDING_TIMEOUT_MS = 10_000;
 const SHUTTLE_VISIBLE_TIMEOUT_MS = 30_000;
 const BALANCE_POLL_MS = 250;
+const UNSEEN_ON_BASE_GRACE_MS = 120_000;
 
-export type PendingDeposit = { shuttleId: number; units: string; signature: string; confirmedAtMs: number };
+type DepositBase = { shuttleId: number; units: bigint; createdAtMs: number };
+type IntentRecord = DepositBase & { state: "intent" };
+type SentRecord = DepositBase & { state: "sent"; signature: string };
+type StrandedRecord = DepositBase & { state: "stranded"; signature: string | null; detail: string };
+
+export type DepositRecord = IntentRecord | SentRecord | StrandedRecord;
 
 export type DepositOutcome =
   | { state: "landed"; signature: string; units: bigint; landedMs: number }
   | { state: "pending"; signature: string; shuttleId: number };
 
-export type RecoveryOutcome = { shuttleId: number; state: "merged" | "waiting" | "gone"; detail: string };
+export type RecoveryOutcome = { shuttleId: number; state: "merged" | "landed" | "closed" | "waiting"; detail: string };
+
+export type ShuttleSighting = "absent" | "funded" | "emptied";
+
+export type BaseShuttle = { kind: "missing" } | { kind: "delegated" } | { kind: "undelegated" } | { kind: "foreign"; owner: string };
+
+export type DepositChain = {
+  readOwnerUnits: () => Promise<Result<bigint>>;
+  readShuttle: (shuttleId: number) => Promise<Result<ShuttleSighting>>;
+  readBaseShuttle: (shuttleId: number) => Promise<Result<BaseShuttle>>;
+  submitDeposit: (units: bigint, shuttleId: number) => Promise<Result<BaseSubmission>>;
+  confirmDeposit: (submission: BaseSubmission) => Promise<BaseConfirmation>;
+  redelegateShuttle: (shuttleId: number) => Promise<Result<unknown>>;
+  mergeShuttle: (shuttleId: number) => Promise<RollupAck>;
+};
 
 export type DepositQueue = {
   deposit: (units: bigint) => Promise<Result<DepositOutcome>>;
   recoverPending: () => Promise<RecoveryOutcome[]>;
-  listPending: () => PendingDeposit[];
+  listPending: () => DepositRecord[];
 };
 
-export type DepositQueueSetup = {
-  client: ChainClient;
-  owner: TransactionSigner;
-  mint: PublicKey;
-  validator: PublicKey;
-  store: KeyStore;
+export type DepositChainSetup = { client: ChainClient; owner: TransactionSigner; mint: PublicKey; validator: PublicKey };
+
+export type DepositQueueSetup = { chain: DepositChain; owner: PublicKey; store: KeyStore; readNowMs?: () => number };
+
+export const createDepositChain = ({ client, owner, mint, validator }: DepositChainSetup): DepositChain => {
+  const ownerToken = findWalletTokenAddress(owner.publicKey, mint);
+  const feePayer = resolveFeePayer(client.feePayment, owner.publicKey);
+  const deriveShuttle = (shuttleId: number) => {
+    const [ephemeralAta] = deriveShuttleEphemeralAta(owner.publicKey, mint, shuttleId);
+    const [record] = deriveShuttleAta(ephemeralAta, mint);
+    return { ephemeralAta, record, walletAta: deriveShuttleWalletAta(mint, ephemeralAta) };
+  };
+  return {
+    readOwnerUnits: () => readTokenUnits(client.rollup, ownerToken),
+    readShuttle: async (shuttleId) => {
+      const units = await readTokenAccountUnits(client.rollup, deriveShuttle(shuttleId).walletAta);
+      if (!units.ok) return units;
+      if (units.value === null) return success("absent");
+      return success(units.value > 0n ? "funded" : "emptied");
+    },
+    readBaseShuttle: async (shuttleId) => {
+      const record = await attempt(() => client.base.getAccountInfo(deriveShuttle(shuttleId).record, "confirmed"));
+      if (!record.ok) return record;
+      if (record.value === null) return success({ kind: "missing" });
+      if (record.value.owner.equals(DELEGATION_PROGRAM_ID)) return success({ kind: "delegated" });
+      if (record.value.owner.equals(EPHEMERAL_SPL_TOKEN_PROGRAM_ID)) return success({ kind: "undelegated" });
+      return success({ kind: "foreign", owner: record.value.owner.toBase58() });
+    },
+    submitDeposit: async (units, shuttleId) => {
+      const instructions = await attempt(() => delegateSpl(owner.publicKey, mint, units, { validator, payer: feePayer, shuttleId }));
+      if (!instructions.ok) return failure(`[submitDeposit] build: ${instructions.reason}`);
+      return submitOnBase(client.base, client.feePayment, instructions.value, [owner]);
+    },
+    confirmDeposit: (submission) => confirmOnBase(client.base, submission),
+    redelegateShuttle: (shuttleId) => {
+      const shuttle = deriveShuttle(shuttleId);
+      return sendOnBase(client.base, client.feePayment, [delegateShuttleEphemeralAtaIx(feePayer, shuttle.ephemeralAta, shuttle.record, validator)], [owner]);
+    },
+    mergeShuttle: (shuttleId) => {
+      const shuttle = deriveShuttle(shuttleId);
+      const merge = mergeShuttleIntoAtaIx(owner.publicKey, ownerToken, shuttle.ephemeralAta, shuttle.walletAta, mint);
+      return sendOnRollup(client.rollupUrl, client.rollupBlockhashes, [merge], [owner]);
+    },
+  };
 };
 
-const isPendingDeposit = (value: unknown): value is PendingDeposit =>
-  typeof value === "object" &&
-  value !== null &&
-  "shuttleId" in value &&
-  typeof value.shuttleId === "number" &&
-  "units" in value &&
-  typeof value.units === "string" &&
-  "signature" in value &&
-  typeof value.signature === "string" &&
-  "confirmedAtMs" in value &&
-  typeof value.confirmedAtMs === "number";
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+
+const parseDepositRecord = (text: string): DepositRecord | null => {
+  const parsed = attemptSync((): unknown => JSON.parse(text));
+  if (!parsed.ok || !isRecord(parsed.value)) return null;
+  const { shuttleId, units, createdAtMs, state, signature, detail } = parsed.value;
+  if (typeof shuttleId !== "number" || typeof units !== "string" || typeof createdAtMs !== "number") return null;
+  const unitCount = attemptSync(() => BigInt(units));
+  if (!unitCount.ok) return null;
+  const base: DepositBase = { shuttleId, units: unitCount.value, createdAtMs };
+  if (state === "intent") return { ...base, state };
+  if (state === "sent" && typeof signature === "string") return { ...base, state, signature };
+  if (state === "stranded" && (typeof signature === "string" || signature === null) && typeof detail === "string") {
+    return { ...base, state, signature, detail };
+  }
+  return null;
+};
+
+const serializeDepositRecord = (record: DepositRecord): string => JSON.stringify({ ...record, units: record.units.toString() });
+
+const createDepositLedger = (store: KeyStore, owner: PublicKey) => {
+  const prefix = `${DEPOSIT_KEY_PREFIX}${owner.toBase58()}.`;
+  const nameEntry = (shuttleId: number) => `${prefix}${shuttleId}`;
+  const readStored = (shuttleId: number): DepositRecord | null => {
+    const text = store.read(nameEntry(shuttleId));
+    return text === null ? null : parseDepositRecord(text);
+  };
+  const isStillAt = (record: DepositRecord): boolean => {
+    const stored = readStored(record.shuttleId);
+    return stored !== null && stored.state === record.state && stored.createdAtMs === record.createdAtMs;
+  };
+  const replace = <Next extends DepositRecord>(from: DepositRecord, next: Next): Result<Next> => {
+    if (!isStillAt(from)) return failure(`[createDepositLedger] shuttle ${from.shuttleId} moved past ${from.state} elsewhere`);
+    return store.write(nameEntry(next.shuttleId), serializeDepositRecord(next)) ? success(next) : failure("[createDepositLedger] storage refused the write");
+  };
+  return {
+    list: (): DepositRecord[] =>
+      store.listKeys(prefix).flatMap((key) => {
+        const text = store.read(key);
+        const record = text === null ? null : parseDepositRecord(text);
+        return record === null ? [] : [record];
+      }),
+    recordIntent: (shuttleId: number, units: bigint, createdAtMs: number): Result<IntentRecord> => {
+      if (store.read(nameEntry(shuttleId)) !== null) return failure(`[createDepositLedger] shuttle ${shuttleId} is already recorded`);
+      const record: IntentRecord = { shuttleId, units, createdAtMs, state: "intent" };
+      return store.write(nameEntry(shuttleId), serializeDepositRecord(record)) ? success(record) : failure("[createDepositLedger] storage refused the write");
+    },
+    markSent: (record: IntentRecord, signature: string) => replace(record, { ...record, state: "sent", signature }),
+    markStranded: (record: DepositRecord, detail: string) =>
+      replace(record, { ...record, state: "stranded", signature: record.state === "intent" ? null : record.signature, detail }),
+    settle: (record: DepositRecord): Result<null> => {
+      if (!isStillAt(record)) return failure(`[createDepositLedger] shuttle ${record.shuttleId} moved past ${record.state} elsewhere`);
+      return store.remove(nameEntry(record.shuttleId)) ? success(null) : failure("[createDepositLedger] storage refused the removal");
+    },
+  };
+};
 
 const drawShuttleId = (): number => crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
 
-export const createDepositQueue = ({ client, owner, mint, validator, store }: DepositQueueSetup): DepositQueue => {
-  const storageKey = `${PENDING_DEPOSITS_PREFIX}${owner.publicKey.toBase58()}`;
-  const ownerToken = findWalletTokenAddress(owner.publicKey, mint);
-  const feePayer = resolveFeePayer(client.feePayment, owner.publicKey);
+export const createDepositQueue = ({ chain, owner, store, readNowMs = Date.now }: DepositQueueSetup): DepositQueue => {
+  const ledger = createDepositLedger(store, owner);
   let queueTail: Promise<unknown> = Promise.resolve();
+
+  const reportLedgerFailure = (outcome: Result<unknown>): void => {
+    if (!outcome.ok) console.warn(`[createDepositQueue] ${outcome.reason}`);
+  };
 
   const enqueue = <Value>(task: () => Promise<Value>): Promise<Value> => {
     const run = queueTail.then(task);
@@ -71,91 +188,105 @@ export const createDepositQueue = ({ client, owner, mint, validator, store }: De
     return run;
   };
 
-  const listPending = (): PendingDeposit[] => {
-    const storedText = store.read(storageKey);
-    const parsed = storedText === null ? null : attemptSync((): unknown => JSON.parse(storedText));
-    if (parsed === null || !parsed.ok || !Array.isArray(parsed.value)) return [];
-    const entries: unknown[] = parsed.value;
-    return entries.filter(isPendingDeposit);
-  };
-
-  const savePending = (pending: PendingDeposit[]) => {
-    if (pending.length === 0) store.remove(storageKey);
-    else store.write(storageKey, JSON.stringify(pending));
-  };
-
-  const forgetPending = (shuttleId: number) => savePending(listPending().filter((entry) => entry.shuttleId !== shuttleId));
-
-  const runDeposit = async (units: bigint): Promise<Result<DepositOutcome>> => {
-    const before = await readTokenUnits(client.rollup, ownerToken);
-    if (!before.ok) return failure(`[runDeposit] rollup balance: ${before.reason}`);
-    const shuttleId = drawShuttleId();
-    const instructions = await attempt(() => delegateSpl(owner.publicKey, mint, units, { validator, payer: feePayer, shuttleId }));
-    if (!instructions.ok) return failure(`[runDeposit] build: ${instructions.reason}`);
-    const sent = await sendOnBase(client.base, client.feePayment, instructions.value, [owner]);
-    if (!sent.ok) return failure(`[runDeposit] ${sent.reason}`);
-    const confirmedAtMs = Date.now();
-    savePending([...listPending(), { shuttleId, units: units.toString(), signature: sent.value.signature, confirmedAtMs }]);
-    const landed = await pollUntil(
+  const waitForLanding = (shuttleId: number, units: bigint, unitsBefore: bigint) => {
+    let hasSeenShuttleFunded = false;
+    return pollUntil(
       "deposit on the rollup",
       async () => {
-        const current = await readTokenUnits(client.rollup, ownerToken);
-        return current.ok && current.value !== before.value ? current.value : null;
+        const [ownerUnits, shuttle] = await Promise.all([chain.readOwnerUnits(), chain.readShuttle(shuttleId)]);
+        if (shuttle.ok && shuttle.value === "emptied") return true;
+        if (shuttle.ok && shuttle.value === "absent" && hasSeenShuttleFunded) return true;
+        if (shuttle.ok && shuttle.value === "funded") hasSeenShuttleFunded = true;
+        return ownerUnits.ok && ownerUnits.value >= unitsBefore + units ? true : null;
       },
       DEPOSIT_LANDING_TIMEOUT_MS,
       BALANCE_POLL_MS,
     );
-    if (!landed.ok) return success({ state: "pending", signature: sent.value.signature, shuttleId });
-    forgetPending(shuttleId);
-    return success({ state: "landed", signature: sent.value.signature, units, landedMs: Date.now() - confirmedAtMs });
   };
 
-  const mergeShuttle = async (pending: PendingDeposit, shuttleEphemeralAta: PublicKey, shuttleWalletAta: PublicKey): Promise<RecoveryOutcome> => {
-    const merge = mergeShuttleIntoAtaIx(owner.publicKey, ownerToken, shuttleEphemeralAta, shuttleWalletAta, mint);
-    const ack = await sendOnRollup(client.rollupUrl, client.rollupBlockhashes, [merge], [owner]);
-    if (!ack.ok) return { shuttleId: pending.shuttleId, state: "waiting", detail: `merge refused: ${ack.errorName} ${ack.detail}` };
-    forgetPending(pending.shuttleId);
-    return { shuttleId: pending.shuttleId, state: "merged", detail: ack.signature };
+  const runDeposit = async (units: bigint): Promise<Result<DepositOutcome>> => {
+    const before = await chain.readOwnerUnits();
+    if (!before.ok) return failure(`[runDeposit] rollup balance: ${before.reason}`);
+    const createdAtMs = readNowMs();
+    const intent = ledger.recordIntent(drawShuttleId(), units, createdAtMs);
+    if (!intent.ok) return failure(`[runDeposit] nothing was sent, the deposit cannot be recorded first: ${intent.reason}`);
+    const submitted = await chain.submitDeposit(units, intent.value.shuttleId);
+    if (!submitted.ok) return failure(`[runDeposit] ${submitted.reason}`);
+    const signature = submitted.value.signature;
+    const sent = ledger.markSent(intent.value, signature);
+    reportLedgerFailure(sent);
+    const current: DepositRecord = sent.ok ? sent.value : intent.value;
+    const confirmed = await chain.confirmDeposit(submitted.value);
+    if (!confirmed.ok && confirmed.hasLanded) {
+      reportLedgerFailure(ledger.settle(current));
+      return failure(`[runDeposit] the deposit failed on base and moved nothing: ${confirmed.reason}`);
+    }
+    const landed = await waitForLanding(intent.value.shuttleId, units, before.value);
+    if (!landed.ok) {
+      reportLedgerFailure(ledger.markStranded(current, landed.reason));
+      return success({ state: "pending", signature, shuttleId: intent.value.shuttleId });
+    }
+    reportLedgerFailure(ledger.settle(current));
+    return success({ state: "landed", signature, units, landedMs: readNowMs() - createdAtMs });
   };
 
-  const recoverOne = async (pending: PendingDeposit): Promise<RecoveryOutcome> => {
-    const [shuttleEphemeralAta] = deriveShuttleEphemeralAta(owner.publicKey, mint, pending.shuttleId);
-    const [shuttleAta] = deriveShuttleAta(shuttleEphemeralAta, mint);
-    const shuttleWalletAta = deriveShuttleWalletAta(mint, shuttleEphemeralAta);
-    const readShuttleUnits = async () => {
-      const units = await readTokenUnits(client.rollup, shuttleWalletAta);
-      return units.ok && units.value > 0n ? units.value : null;
-    };
-    if ((await readShuttleUnits()) !== null) return mergeShuttle(pending, shuttleEphemeralAta, shuttleWalletAta);
-    const record = await attempt(() => client.base.getAccountInfo(shuttleAta, "confirmed"));
-    if (!record.ok) return { shuttleId: pending.shuttleId, state: "waiting", detail: record.reason };
-    if (record.value === null) {
-      forgetPending(pending.shuttleId);
-      return { shuttleId: pending.shuttleId, state: "gone", detail: "the shuttle record is closed on base" };
+  const settleAs = (record: DepositRecord, state: RecoveryOutcome["state"], detail: string): RecoveryOutcome => {
+    reportLedgerFailure(ledger.settle(record));
+    return { shuttleId: record.shuttleId, state, detail };
+  };
+
+  const keepWaiting = (record: DepositRecord, detail: string): RecoveryOutcome => ({ shuttleId: record.shuttleId, state: "waiting", detail });
+
+  const mergeShuttle = async (record: DepositRecord): Promise<RecoveryOutcome> => {
+    const ack = await chain.mergeShuttle(record.shuttleId);
+    if (ack.ok) return settleAs(record, "merged", ack.signature);
+    const detail = `merge refused: ${ack.errorName} ${ack.detail}`;
+    reportLedgerFailure(ledger.markStranded(record, detail));
+    return keepWaiting(record, detail);
+  };
+
+  const recoverOne = async (record: DepositRecord): Promise<RecoveryOutcome> => {
+    const shuttle = await chain.readShuttle(record.shuttleId);
+    if (!shuttle.ok) return keepWaiting(record, shuttle.reason);
+    if (shuttle.value === "funded") return mergeShuttle(record);
+    if (shuttle.value === "emptied") return settleAs(record, "landed", "the rollup already merged the shuttle");
+    const base = await chain.readBaseShuttle(record.shuttleId);
+    if (!base.ok) return keepWaiting(record, base.reason);
+    switch (base.value.kind) {
+      case "missing":
+        return readNowMs() - record.createdAtMs < UNSEEN_ON_BASE_GRACE_MS
+          ? keepWaiting(record, "the deposit is not on base yet")
+          : settleAs(record, "closed", "no shuttle on base two minutes after the deposit was recorded");
+      case "delegated":
+        return keepWaiting(record, "the shuttle is delegated and the rollup has not taken it yet");
+      case "foreign":
+        return keepWaiting(record, `unexpected shuttle owner ${base.value.owner}`);
+      case "undelegated": {
+        const redelegated = await chain.redelegateShuttle(record.shuttleId);
+        if (!redelegated.ok) return keepWaiting(record, redelegated.reason);
+        const visible = await pollUntil(
+          "shuttle on the rollup",
+          async () => {
+            const sighting = await chain.readShuttle(record.shuttleId);
+            return sighting.ok && sighting.value === "funded" ? true : null;
+          },
+          SHUTTLE_VISIBLE_TIMEOUT_MS,
+          BALANCE_POLL_MS,
+        );
+        return visible.ok ? mergeShuttle(record) : keepWaiting(record, visible.reason);
+      }
     }
-    if (record.value.owner.equals(DELEGATION_PROGRAM_ID)) {
-      return { shuttleId: pending.shuttleId, state: "waiting", detail: "the shuttle is still delegated and the rollup has not taken it" };
-    }
-    if (!record.value.owner.equals(EPHEMERAL_SPL_TOKEN_PROGRAM_ID)) {
-      return { shuttleId: pending.shuttleId, state: "waiting", detail: `unexpected shuttle owner ${record.value.owner.toBase58()}` };
-    }
-    const redelegate = delegateShuttleEphemeralAtaIx(feePayer, shuttleEphemeralAta, shuttleAta, validator);
-    const sent = await sendOnBase(client.base, client.feePayment, [redelegate], [owner]);
-    if (!sent.ok) return { shuttleId: pending.shuttleId, state: "waiting", detail: sent.reason };
-    const visible = await pollUntil("shuttle on the rollup", readShuttleUnits, SHUTTLE_VISIBLE_TIMEOUT_MS, BALANCE_POLL_MS);
-    if (!visible.ok) return { shuttleId: pending.shuttleId, state: "waiting", detail: visible.reason };
-    return mergeShuttle(pending, shuttleEphemeralAta, shuttleWalletAta);
   };
 
   const recoverPending = async (): Promise<RecoveryOutcome[]> => {
     const outcomes: RecoveryOutcome[] = [];
-    for (const pending of listPending()) outcomes.push(await recoverOne(pending));
+    for (const record of ledger.list()) outcomes.push(await recoverOne(record));
     return outcomes;
   };
 
   return {
     deposit: (units) => enqueue(() => runDeposit(units)),
     recoverPending: () => enqueue(recoverPending),
-    listPending,
+    listPending: ledger.list,
   };
 };

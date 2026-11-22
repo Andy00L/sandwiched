@@ -6,12 +6,12 @@ import { type SeatSnapshot, type TableSnapshot, fetchSeat, fetchTable, watchSeat
 import { findSeatAddress, findWalletTokenAddress } from "../src/lib/chain/addresses";
 import { createChainClient, createSponsoredFeePayment, fetchSponsorStatus } from "../src/lib/chain/client";
 import { ROLLUP_RPC_URL, ROLLUP_WS_URL, SPONSOR_ROUTE_PATH } from "../src/lib/chain/config";
-import { createDepositQueue } from "../src/lib/chain/deposits";
+import { createDepositChain, createDepositQueue } from "../src/lib/chain/deposits";
 import { loadGuestKey } from "../src/lib/chain/guest-key";
 import { type KeyStore, createMemoryKeyStore } from "../src/lib/chain/key-store";
 import { claimTestUsdc, createSeatActions, sitAtTable } from "../src/lib/chain/player";
 import { type Result, attempt, attemptSync, failure, pollUntil, success } from "../src/lib/chain/result";
-import { openSession } from "../src/lib/chain/session";
+import { createSessionKeeper } from "../src/lib/chain/session";
 import { type RollupAck, createKeypairSigner, readTokenUnits } from "../src/lib/chain/transport";
 
 const DEFAULT_ROUTE_URL = `http://localhost:3001${SPONSOR_ROUTE_PATH}`;
@@ -36,9 +36,11 @@ const createFileKeyStore = (path: string): KeyStore => {
   };
   const writeAll = (values: Record<string, string>) => writeFileSync(path, JSON.stringify(values), { mode: 0o600 });
   return {
+    isDurable: true,
     read: (key) => readAll()[key] ?? null,
     write: (key, value) => attemptSync(() => writeAll({ ...readAll(), [key]: value })).ok,
-    remove: (key) => writeAll(Object.fromEntries(Object.entries(readAll()).filter(([storedKey]) => storedKey !== key))),
+    remove: (key) => attemptSync(() => writeAll(Object.fromEntries(Object.entries(readAll()).filter(([storedKey]) => storedKey !== key)))).ok,
+    listKeys: (prefix) => Object.keys(readAll()).filter((key) => key.startsWith(prefix)),
   };
 };
 
@@ -92,16 +94,18 @@ const runGuestCheck = async (
   const guest = loadGuestKey(store);
   const wallet = createKeypairSigner(guest.keypair);
   log(`fresh guest ${guest.keypair.publicKey.toBase58()}, sponsor ${sponsor.toBase58()}`);
+  if (!guest.isPersisted) log("the guest key is not persisted, a rerun without a key file starts a new wallet");
   const table = await fetchTable(client.programs.sandwich, client.rollup, tableAddress);
   if (!table.ok || table.value === null) return failure(`[runGuestCheck] table: ${table.ok ? "missing" : table.reason}`);
   const mint = table.value.mint;
   const validator = table.value.validator;
 
   const setupStartedAt = performance.now();
+  const sessions = createSessionKeeper(client, wallet, store);
   const [seated, funded, session] = await Promise.all([
     sitAtTable(client, wallet, tableAddress),
     claimTestUsdc(client, wallet),
-    openSession(client, wallet, store),
+    sessions.resolve(),
   ]);
   if (!seated.ok) return seated;
   if (!funded.ok) return funded;
@@ -134,7 +138,7 @@ const runGuestCheck = async (
   const feedLive = await pollUntil("live feed", async () => (liveFeed.status() === "live" && liveTable.seen.length > 0 ? true : null), UPDATE_TIMEOUT_MS, 10);
   if (!feedLive.ok) return feedLive;
 
-  const actions = createSeatActions({ client, table: tableAddress, mint, wallet, session: session.value });
+  const actions = createSeatActions({ client, table: tableAddress, mint, wallet, sessions });
   const isGuest = (key: PublicKey | null) => key?.equals(guest.keypair.publicKey) === true;
   const joinSentAt = performance.now();
   const joinAck = requireAck("join", await actions.join());
@@ -145,7 +149,7 @@ const runGuestCheck = async (
   if (!joinedSeat.ok) return joinedSeat;
   log(`join acknowledged in ${joinAck.value} ms, table update ${roundMs(joinedTable.value.receivedAtMs - joinSentAt)} ms after send, guest at place ${joinedSeat.value.snapshot.seatIndex}`);
 
-  const deposits = createDepositQueue({ client, owner: wallet, mint, validator, store });
+  const deposits = createDepositQueue({ chain: createDepositChain({ client, owner: wallet, mint, validator }), owner: wallet.publicKey, store });
   const runMoneyLeg = async () => {
     const deposited = await deposits.deposit(DEPOSIT_UNITS);
     if (!deposited.ok) return deposited;

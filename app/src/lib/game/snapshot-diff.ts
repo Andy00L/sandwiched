@@ -1,4 +1,4 @@
-import type { SeatSnapshot, TableSnapshot } from "../chain/accounts";
+import type { RoundSnapshot, SeatSnapshot, TableSnapshot } from "../chain/accounts";
 import { applyLandedSwats, countDroppedCrumbs, readChainPigeon, readPigeonBox, readPigeonView, settlePigeonAt } from "./chain-rules";
 import type { PeckedEvent, RoundEvent, RoundTiming, SwatLandedEvent } from "./round-events";
 import { applyRoundEvent, type PigeonView, type RoundViewState, type SeatView } from "./view-state";
@@ -15,27 +15,14 @@ type ActionStep = "join" | "ante" | "draw" | "raise" | "seat" | "settle";
 
 const STEP_ORDER: Readonly<Record<ActionStep, number>> = { join: 0, ante: 1, draw: 2, raise: 3, seat: 4, settle: 5 };
 
+type SettleAction = { tick: number; step: "settle"; whaleCrumbs: number; pigeonCrumbs: number; round: RoundSnapshot };
+
 type ChainAction =
   | { tick: number; step: Exclude<ActionStep, "seat" | "settle">; event: RoundEvent }
-  | { tick: number; step: "settle"; whaleCrumbs: number; pigeonCrumbs: number }
+  | SettleAction
   | { tick: number; step: "seat"; seat: number; before: SeatSnapshot | null; after: SeatSnapshot };
 
 type TickBounds = { floor: number; ceiling: number };
-
-function pickNewer<Snapshot extends { slot: number }>(current: Snapshot | null, candidate: Snapshot | null): Snapshot | null {
-  if (candidate === null) return current;
-  if (current === null) return candidate;
-  return candidate.slot < current.slot ? current : candidate;
-}
-
-export function mergeChainFrames(previous: ChainFrame, next: ChainFrame): ChainFrame {
-  const seats = new Map(previous.seats);
-  for (const [seatIndex, seat] of next.seats) {
-    const newest = pickNewer(previous.seats.get(seatIndex) ?? null, seat);
-    if (newest !== null) seats.set(seatIndex, newest);
-  }
-  return { tick: Math.max(previous.tick, next.tick), table: pickNewer(previous.table, next.table), seats };
-}
 
 function clampTick(tick: number, bounds: TickBounds): number {
   return Math.min(Math.max(tick, bounds.floor), bounds.ceiling);
@@ -115,6 +102,7 @@ function listTableActions(previousTable: TableSnapshot | null, table: TableSnaps
       step: "settle",
       whaleCrumbs: Number(table.lastResult.whaleCrumbs),
       pigeonCrumbs: Number(table.lastResult.pigeonCrumbs),
+      round: table.round,
     });
   }
   return actions;
@@ -130,9 +118,9 @@ function deriveSeatActionTick(before: SeatSnapshot | null, after: SeatSnapshot, 
   return after.slot;
 }
 
-function listSeatActions(previous: ChainFrame, merged: ChainFrame, timing: RoundTiming, bounds: TickBounds): ChainAction[] {
+function listSeatActions(previous: ChainFrame, next: ChainFrame, timing: RoundTiming, bounds: TickBounds): ChainAction[] {
   const actions: ChainAction[] = [];
-  for (const [seat, after] of merged.seats) {
+  for (const [seat, after] of next.seats) {
     const before = previous.seats.get(seat) ?? null;
     if (after === before) continue;
     actions.push({ tick: clampTick(deriveSeatActionTick(before, after, timing), bounds), step: "seat", seat, before, after });
@@ -151,7 +139,7 @@ function isRoundPigeon(seat: SeatView): boolean {
   return seat.role === "pigeon" && seat.presence === "anted";
 }
 
-function findNextDueTick(view: RoundViewState): number | null {
+export function findNextDueTick(view: RoundViewState): number | null {
   if (view.phase !== "live") return null;
   const dueTicks = view.seats.flatMap((seat) => {
     if (seat.pigeon.state === "flying") return [seat.pigeon.landsTick];
@@ -242,12 +230,26 @@ function reconcilePosition(seat: number, viewPigeon: PigeonView, chainPigeon: Pi
   }
 }
 
+function readSettledBeak(
+  seat: SeatView,
+  before: SeatSnapshot | undefined,
+  after: SeatSnapshot | undefined,
+  settle: SettleAction,
+  timing: RoundTiming,
+): number {
+  if (before !== undefined && after !== undefined && after !== before && after.wallet.equals(before.wallet)) {
+    return Number(after.chips - before.chips);
+  }
+  const endTick = Number(settle.round.endTick);
+  if (before === undefined || before.slot >= endTick) return seat.beakCrumbs;
+  return applyLandedSwats(readChainPigeon(before), settle.round, endTick, timing).after.beakCrumbs;
+}
+
 export function deriveRoundEvents(view: RoundViewState, previous: ChainFrame, next: ChainFrame, timing: RoundTiming): RoundEvent[] {
-  const merged = mergeChainFrames(previous, next);
-  const bounds: TickBounds = { floor: previous.tick, ceiling: merged.tick };
+  const bounds: TickBounds = { floor: previous.tick, ceiling: next.tick };
   const actions = [
-    ...listTableActions(previous.table, merged.table, timing, bounds),
-    ...listSeatActions(previous, merged, timing, bounds),
+    ...listTableActions(previous.table, next.table, timing, bounds),
+    ...listSeatActions(previous, next, timing, bounds),
   ].sort(compareActions);
   const events: RoundEvent[] = [];
   let working = view;
@@ -270,13 +272,16 @@ export function deriveRoundEvents(view: RoundViewState, previous: ChainFrame, ne
           kind: "settled",
           whaleCrumbs: action.whaleCrumbs,
           pigeonCrumbs: action.pigeonCrumbs,
-          beaks: working.seats.filter(isRoundPigeon).map((seat) => ({ seat: seat.seat, crumbs: seat.beakCrumbs })),
+          beaks: working.seats.filter(isRoundPigeon).map((seat) => ({
+            seat: seat.seat,
+            crumbs: readSettledBeak(seat, previous.seats.get(seat.seat), next.seats.get(seat.seat), action, timing),
+          })),
         });
         return;
       case "seat": {
         const seatView = findSeatView(action.seat);
         if (working.phase !== "live" || seatView === undefined || !isRoundPigeon(seatView)) return;
-        const peck = hasPecked(action.before, action.after) ? derivePeck(working, merged, seatView, action.after, action.tick, timing) : null;
+        const peck = hasPecked(action.before, action.after) ? derivePeck(working, next, seatView, action.after, action.tick, timing) : null;
         if (peck !== null) emit(peck);
         const chainPigeon = settlePigeonAt(readPigeonView(action.after.pigeon), action.tick);
         const settledSeatView = findSeatView(action.seat);
@@ -294,17 +299,17 @@ export function deriveRoundEvents(view: RoundViewState, previous: ChainFrame, ne
     const candidateTicks = [nextAction?.tick, dueTick ?? undefined].filter((tick) => tick !== undefined);
     if (candidateTicks.length === 0) break;
     const tick = Math.max(cursor, Math.min(...candidateTicks));
-    if (tick > merged.tick) break;
+    if (tick > next.tick) break;
+    cursor = tick;
     if (dueTick !== null && dueTick <= tick) {
       for (const arrival of listArrivals(working, tick)) emit(arrival);
-      const swatLanding = deriveSwatLanding(working, merged.table, tick, timing);
+      const swatLanding = deriveSwatLanding(working, next.table, tick, timing);
       if (swatLanding !== null) emit(swatLanding);
+      continue;
     }
-    for (let action = actions[actionIndex]; action !== undefined && action.tick <= tick; action = actions[actionIndex]) {
-      applyAction(action);
-      actionIndex += 1;
-    }
-    cursor = tick;
+    if (nextAction === undefined) break;
+    applyAction(nextAction);
+    actionIndex += 1;
   }
   return events;
 }
