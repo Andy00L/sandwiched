@@ -5,7 +5,7 @@ import type { ChainClient } from "../chain/client";
 import { readDelegationStatus } from "../chain/delegation";
 import { createDepositChain, createDepositQueue } from "../chain/deposits";
 import type { KeyStore } from "../chain/key-store";
-import { claimTestUsdc, createSeatActions, sitAtTable } from "../chain/player";
+import { claimTestUsdc, createSeatActions, sitAtTable, withdrawToBase } from "../chain/player";
 import { type Result, failure, success } from "../chain/result";
 import { createSessionKeeper } from "../chain/session";
 import { type RollupAck, type TransactionSigner, readTokenUnits } from "../chain/transport";
@@ -28,7 +28,12 @@ export type GuestChainSetup = {
   buyInChips: bigint;
 };
 
-export type GuestPlayChain = { guest: GuestChain; actions: PlayerActions; needs: GuestNeeds };
+export type CashOutReceipt =
+  | { kind: "withdrawn"; chips: bigint; units: bigint; baseSignature: string | null }
+  | { kind: "onRollup"; chips: bigint; units: bigint; reason: string }
+  | { kind: "untouched"; reason: string };
+
+export type GuestPlayChain = { guest: GuestChain; actions: PlayerActions; needs: GuestNeeds; cashOut: () => Promise<Result<CashOutReceipt>> };
 
 const fromAck = (label: string, ack: RollupAck): Result<string> =>
   ack.ok ? success(ack.signature) : failure(`[${label}] ${ack.errorName} ${ack.detail}`);
@@ -114,5 +119,21 @@ export function createGuestPlayChain({ client, wallet, table, tableSnapshot, key
     },
   };
 
-  return { guest: { readFacts, run }, actions, needs };
+  const cashOut = async (): Promise<Result<CashOutReceipt>> => {
+    const seat = await fetchSeat(client.programs.sandwich, client.rollup, seatAddress);
+    if (!seat.ok) return failure(`[cashOut] seat: ${seat.reason}`);
+    const chips = seat.value?.chips ?? 0n;
+    if (chips > 0n) {
+      const cashed = await seatActions.cashOut(chips);
+      if (!cashed.ok) return failure(`[cashOut] ${cashed.errorName} ${cashed.detail}`);
+    }
+    const isAtTable = seat.value !== null && seat.value.seatIndex !== null;
+    const left = isAtTable ? await seatActions.leave() : null;
+    if (left !== null && !left.ok) console.warn(`[cashOut] leave refused: ${left.errorName} ${left.detail}`);
+    const withdrawn = await withdrawToBase(client, wallet, mint, tableSnapshot.validator);
+    if (!withdrawn.ok) return success({ kind: "onRollup", chips, units: chips * tableSnapshot.chipUnits, reason: withdrawn.reason });
+    return success({ kind: "withdrawn", chips, units: withdrawn.value.units, baseSignature: withdrawn.value.signature });
+  };
+
+  return { guest: { readFacts, run }, actions, needs, cashOut };
 }

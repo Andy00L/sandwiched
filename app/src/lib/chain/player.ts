@@ -1,5 +1,6 @@
+import { isMagicAtaTokenAccount, withdrawSpl } from "@magicblock-labs/ephemeral-rollups-sdk";
 import type { PublicKey, TransactionInstruction } from "@solana/web3.js";
-import { findSeatAddress } from "./addresses";
+import { findSeatAddress, findWalletTokenAddress } from "./addresses";
 import type { ChainClient } from "./client";
 import {
   type SeatActor,
@@ -26,6 +27,7 @@ import {
   type RollupAck,
   type TransactionSigner,
   createKeypairSigner,
+  readTokenUnits,
   refuseLocally,
   resolveFeePayer,
   sendOnBase,
@@ -59,6 +61,37 @@ export const claimTestUsdc = (client: ChainClient, wallet: TransactionSigner) =>
     () => buildFaucetInstructions(client.programs.sandwich, resolveFeePayer(client.feePayment, wallet.publicKey), wallet.publicKey),
     wallet,
   );
+
+export type Withdrawal = { signature: string | null; units: bigint; expectedBaseUnits: bigint };
+
+export const withdrawToBase = async (
+  client: ChainClient,
+  wallet: TransactionSigner,
+  mint: PublicKey,
+  validator: PublicKey,
+): Promise<Result<Withdrawal>> => {
+  const walletToken = findWalletTokenAddress(wallet.publicKey, mint);
+  const [rollupUnits, baseUnits, rollupAccount] = await Promise.all([
+    readTokenUnits(client.rollup, walletToken),
+    readTokenUnits(client.base, walletToken),
+    attempt(() => client.rollup.getAccountInfo(walletToken, "processed")),
+  ]);
+  if (!rollupUnits.ok || !baseUnits.ok || !rollupAccount.ok) {
+    const reason = [rollupUnits, baseUnits, rollupAccount].flatMap((read) => (read.ok ? [] : [read.reason])).join("; ");
+    return failure(`[withdrawToBase] cannot read the token balances: ${reason}`);
+  }
+  if (rollupUnits.value === 0n) return success({ signature: null, units: 0n, expectedBaseUnits: baseUnits.value });
+  const magicAtaSource = rollupAccount.value !== null && isMagicAtaTokenAccount(rollupAccount.value.data);
+  const payer = resolveFeePayer(client.feePayment, wallet.publicKey);
+  const sent = await sendBuiltOnBase(
+    client,
+    "withdrawToBase",
+    () => withdrawSpl(wallet.publicKey, mint, rollupUnits.value, { validator, payer, magicAtaSource }),
+    wallet,
+  );
+  if (!sent.ok) return sent;
+  return success({ signature: sent.value.signature, units: rollupUnits.value, expectedBaseUnits: baseUnits.value + rollupUnits.value });
+};
 
 export type SeatActions = {
   join: () => Promise<RollupAck>;

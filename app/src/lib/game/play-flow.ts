@@ -1,3 +1,4 @@
+import type { CashOutReceipt } from "./guest-chain";
 import type { GuestStage, GuestStep } from "./guest-steps";
 import type { RecordedRound } from "./round-events";
 import type { TableListing } from "./table-listings";
@@ -18,7 +19,12 @@ export type RoundSummary = {
 
 export type SeatSheet = { phase: "choosing" } | { phase: "seating"; step: GuestStep | null } | { phase: "failed"; step: GuestStep; reason: string };
 
-export type TableOverlay = { kind: "none" } | { kind: "role"; role: Role; roundNumber: number } | { kind: "results"; summary: RoundSummary };
+export type TableOverlay =
+  | { kind: "none" }
+  | { kind: "role"; role: Role; roundNumber: number }
+  | { kind: "results"; summary: RoundSummary }
+  | { kind: "cashingOut" }
+  | { kind: "receipt"; receipt: CashOutReceipt };
 
 export type PlayFlow =
   | { kind: "home" }
@@ -46,6 +52,8 @@ export type PlayEvent =
   | { kind: "roleSeen"; roundNumber: number }
   | { kind: "roundSettled"; summary: RoundSummary }
   | { kind: "anteAgain" }
+  | { kind: "cashOutStarted" }
+  | { kind: "cashOutEnded"; receipt: CashOutReceipt }
   | { kind: "acted" }
   | { kind: "toggleDrawer"; drawer: Drawer }
   | { kind: "closeDrawer" }
@@ -91,6 +99,10 @@ export function stepPlay(state: PlayState, event: PlayEvent): PlayState {
       return { ...withFlow(state, { ...flow, overlay: { kind: "results", summary: event.summary } }), lastResultsRound: event.summary.roundNumber };
     case "anteAgain":
       return flow.kind === "table" && flow.overlay.kind === "results" ? withFlow(state, { ...flow, overlay: { kind: "none" } }) : state;
+    case "cashOutStarted":
+      return flow.kind === "table" && (flow.overlay.kind === "results" || flow.overlay.kind === "receipt") ? withFlow(state, { ...flow, overlay: { kind: "cashingOut" } }) : state;
+    case "cashOutEnded":
+      return flow.kind === "table" && flow.overlay.kind === "cashingOut" ? withFlow(state, { ...flow, overlay: { kind: "receipt", receipt: event.receipt } }) : state;
     case "acted":
       return state.hasActed ? state : { ...state, hasActed: true };
     case "toggleDrawer":

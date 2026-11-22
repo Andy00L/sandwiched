@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BN } from "@coral-xyz/anchor";
-import { delegateShuttleEphemeralAtaIx, delegateSpl, deriveShuttleAta, deriveShuttleEphemeralAta } from "@magicblock-labs/ephemeral-rollups-sdk";
+import { delegateShuttleEphemeralAtaIx, delegateSpl, deriveShuttleAta, deriveShuttleEphemeralAta, withdrawSpl } from "@magicblock-labs/ephemeral-rollups-sdk";
 import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
   ComputeBudgetProgram,
@@ -108,6 +108,23 @@ describe("reviewSponsoredTransaction accepts the guest path", () => {
     ]);
   });
 
+  test("a test USDC withdrawal from the guest's Magic ATA to its own token account, built by the SDK", async () => {
+    const instructions = await withdrawSpl(guest.publicKey, testMint, 1_000_000n, { validator, payer: sponsor.publicKey, magicAtaSource: true, shuttleId: 9 });
+    const approval = expectApproved(buildTransaction(sponsor.publicKey, instructions));
+    expect(approval?.wallet?.equals(guest.publicKey)).toBe(true);
+    expect(approval?.labels).toEqual(["compute_unit_limit", "create_token_account", "withdraw_shuttle"]);
+  });
+
+  test("a test USDC withdrawal from a plain rollup token account, built by the SDK", async () => {
+    const instructions = await withdrawSpl(guest.publicKey, testMint, 1_000_000n, { validator, payer: sponsor.publicKey, shuttleId: 9 });
+    expect(expectApproved(buildTransaction(sponsor.publicKey, instructions))?.labels).toEqual([
+      "compute_unit_limit",
+      "deposit_init_ephemeral_ata",
+      "deposit_delegate_ephemeral_ata",
+      "withdraw_shuttle",
+    ]);
+  });
+
   test("the re-delegation of a stuck deposit shuttle", () => {
     const [shuttleEphemeralAta] = deriveShuttleEphemeralAta(guest.publicKey, testMint, 7);
     const [shuttleAta] = deriveShuttleAta(shuttleEphemeralAta, testMint);
@@ -117,6 +134,18 @@ describe("reviewSponsoredTransaction accepts the guest path", () => {
 });
 
 describe("reviewSponsoredTransaction refuses", () => {
+  test("a withdrawal whose tokens land in another wallet's token account", async () => {
+    const [withdrawal] = (await withdrawSpl(guest.publicKey, testMint, 1_000_000n, { validator, payer: sponsor.publicKey, magicAtaSource: true, shuttleId: 9 })).slice(-1);
+    if (withdrawal === undefined) return expect(withdrawal).toBeDefined();
+    const redirected = withdrawal.keys.map((key, slot) => (slot === 13 ? { ...key, pubkey: getAssociatedTokenAddressSync(testMint, otherGuest.publicKey) } : key));
+    expectRefused(buildTransaction(sponsor.publicKey, [{ ...withdrawal, keys: redirected }]), "the withdrawal destination");
+  });
+
+  test("a withdrawal of another mint", async () => {
+    const instructions = await withdrawSpl(guest.publicKey, otherMint, 1_000_000n, { validator, payer: sponsor.publicKey, magicAtaSource: true, shuttleId: 9 });
+    expectRefused(buildTransaction(sponsor.publicKey, instructions.slice(-1)), "the withdrawal mint");
+  });
+
   test("a transaction whose fee payer is not the sponsor", async () => {
     const instructions = await buildSitInstructions(programs.sandwich, guest.publicKey, guest.publicKey, table);
     expectRefused(buildTransaction(guest.publicKey, instructions), "fee payer");

@@ -10,7 +10,7 @@ import { type Result, attemptSync, failure, success } from "../chain/result";
 import { createRpcConnection } from "../chain/rpc";
 import { type FeePayment, createKeypairSigner } from "../chain/transport";
 import { LIVE_TIMING } from "./chain-rules";
-import { type ActionSigner, createGuestPlayChain } from "./guest-chain";
+import { type ActionSigner, type CashOutReceipt, createGuestPlayChain } from "./guest-chain";
 import type { GuestStage } from "./guest-steps";
 import type { RecordedRound } from "./round-events";
 import { type RoundSource, waitForLiveRoundSource } from "./round-source";
@@ -120,7 +120,15 @@ export type GuestSeatSetup = {
   onStage: (stage: GuestStage) => void;
 };
 
-export type GuestSeat = { store: TableStore; player: TablePlayer; guest: PublicKey; client: ChainClient; tableSnapshot: TableSnapshot; close: () => void };
+export type GuestSeat = {
+  store: TableStore;
+  player: TablePlayer;
+  guest: PublicKey;
+  client: ChainClient;
+  tableSnapshot: TableSnapshot;
+  cashOut: () => Promise<Result<CashOutReceipt>>;
+  close: () => void;
+};
 
 export async function seatGuest(setup: GuestSeatSetup): Promise<Result<GuestSeat>> {
   const { table, feed } = setup;
@@ -150,10 +158,18 @@ export async function seatGuest(setup: GuestSeatSetup): Promise<Result<GuestSeat
     player.stop();
     stopFeed();
   };
-  return success({ store, player, guest: wallet.publicKey, client, tableSnapshot: tableSnapshot.value, close });
+  return success({ store, player, guest: wallet.publicKey, client, tableSnapshot: tableSnapshot.value, cashOut: play.cashOut, close });
 }
 
-export type LivePlay = { source: RoundSource; store: TableStore; player: TablePlayer; guest: PublicKey; tableSnapshot: TableSnapshot; close: () => void };
+export type LivePlay = {
+  source: RoundSource;
+  store: TableStore;
+  player: TablePlayer;
+  guest: PublicKey;
+  tableSnapshot: TableSnapshot;
+  cashOut: () => Promise<Result<CashOutReceipt>>;
+  close: () => void;
+};
 
 export type CompanionSeat = { table: PublicKey; feed: AccountFeed; keyStore: KeyStore; guest: PublicKey };
 
@@ -196,7 +212,10 @@ export async function openLivePlay(setup: LivePlaySetup): Promise<Result<LivePla
   };
   reportSettledRounds(seated.value.store);
   const source = await waitForLiveRoundSource(seated.value.store, setup.timeoutMs);
-  if (source.ok) return success({ source: source.value, store: seated.value.store, player: seated.value.player, guest: seated.value.guest, tableSnapshot: seated.value.tableSnapshot, close });
+  if (source.ok) {
+    const { store, player, guest, tableSnapshot, cashOut } = seated.value;
+    return success({ source: source.value, store, player, guest, tableSnapshot, cashOut, close });
+  }
   close();
   return source;
 }

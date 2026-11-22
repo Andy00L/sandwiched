@@ -10,12 +10,12 @@ import { PaperSheet } from "./PaperSheet";
 import styles from "./paper.module.css";
 import { useLatestShown } from "./use-latest-shown";
 
-export type ResultsSheetProps = { summary: RoundSummary | null; table: TableListing | null; onAnteAgain: () => void };
+export type ResultsSheetProps = { summary: RoundSummary | null; table: TableListing | null; onAnteAgain: () => void; onCashOut: () => void };
 
 const describeOwnLine = (summary: RoundSummary, usdc: string): string =>
   summary.ownRole === "whale" ? `You kept ${summary.ownCrumbs} crumbs. That is ${usdc} test USDC.` : `You pecked ${summary.ownCrumbs} crumbs. That is ${usdc} test USDC.`;
 
-export function ResultsSheet({ summary, table, onAnteAgain }: ResultsSheetProps) {
+export function ResultsSheet({ summary, table, onAnteAgain, onCashOut }: ResultsSheetProps) {
   const shown = useLatestShown(summary);
   const shownTable = useLatestShown(table);
   if (shown === null || shownTable === null) {
@@ -59,6 +59,7 @@ export function ResultsSheet({ summary, table, onAnteAgain }: ResultsSheetProps)
         <InkButton isPrimary keyHint="Enter" onPress={onAnteAgain}>
           Ante again
         </InkButton>
+        <InkButton onPress={onCashOut}>Cash out</InkButton>
       </div>
     </PaperSheet>
   );

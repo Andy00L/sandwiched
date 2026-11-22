@@ -6,6 +6,7 @@ import { readHintRole } from "@/lib/game/play-flow";
 import { FaultSheet } from "./FaultSheet";
 import { HelpSheet } from "./HelpSheet";
 import { HintLine } from "./HintLine";
+import { ReceiptSheet } from "./ReceiptSheet";
 import { ResultsSheet } from "./ResultsSheet";
 import { RoleSheet } from "./RoleSheet";
 import { SeatSheet } from "./SeatSheet";
@@ -24,6 +25,12 @@ export function PlaySheets({ controller }: { controller: PlayController }) {
         summary={overlay?.kind === "results" && drawer === null ? overlay.summary : null}
         table={flow.kind === "table" ? flow.table : null}
         onAnteAgain={controller.anteAgain}
+        onCashOut={controller.cashOut}
+      />
+      <ReceiptSheet
+        receipt={overlay?.kind === "receipt" && drawer === null ? overlay.receipt : null}
+        isCashingOut={overlay?.kind === "cashingOut" && drawer === null}
+        onRetry={controller.cashOut}
       />
       <HelpSheet isOpen={drawer === "help"} onClose={controller.closeDrawer} />
       <SettingsSheet isOpen={drawer === "settings"} onClose={controller.closeDrawer} />

@@ -41,6 +41,21 @@ describe("stepPlay", () => {
     expect(stepPlay(anted, { kind: "roundSettled", summary: SUMMARY }).flow).toMatchObject({ overlay: { kind: "none" } });
   });
 
+  test("cashing out goes from the results to a receipt, and a receipt that left money on the rollup can try again", () => {
+    const results = play(
+      { kind: "pickTable", table: TABLE },
+      { kind: "playNow" },
+      { kind: "seatStage", stage: { kind: "ready" } },
+      { kind: "roundSettled", summary: SUMMARY },
+    );
+    const cashing = stepPlay(results, { kind: "cashOutStarted" });
+    expect(cashing.flow).toMatchObject({ overlay: { kind: "cashingOut" } });
+    expect(stepPlay(cashing, { kind: "anteAgain" })).toBe(cashing);
+    const stuck = stepPlay(cashing, { kind: "cashOutEnded", receipt: { kind: "onRollup", chips: 400n, units: 400_000n, reason: "base down" } });
+    expect(stuck.flow).toMatchObject({ overlay: { kind: "receipt", receipt: { kind: "onRollup" } } });
+    expect(stepPlay(stuck, { kind: "cashOutStarted" }).flow).toMatchObject({ overlay: { kind: "cashingOut" } });
+  });
+
   test("an open drawer covers the table and toggles closed with the same key", () => {
     const seated = play({ kind: "pickTable", table: TABLE }, { kind: "playNow" }, { kind: "seatStage", stage: { kind: "ready" } });
     const helping = stepPlay(seated, { kind: "toggleDrawer", drawer: "help" });

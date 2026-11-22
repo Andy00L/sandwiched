@@ -22,6 +22,7 @@ export type PlayController = {
   goHome: () => void;
   playNow: (buyInChips: bigint) => void;
   anteAgain: () => void;
+  cashOut: () => void;
   toggleDrawer: (drawer: Drawer) => void;
   closeDrawer: () => void;
   clickTable: (target: ClickTarget) => void;
@@ -40,6 +41,7 @@ const openListedTable = (table: TableListing, buyInChips: bigint, onStage: (stag
 export function createPlayController(ports: PlayControllerPorts): PlayController {
   let state = INITIAL_PLAY_STATE;
   let play: LivePlay | null = null;
+  let cashOutOfLastPlay: LivePlay["cashOut"] | null = null;
   const listeners = new Set<() => void>();
 
   const dispatch = (event: PlayEvent) => {
@@ -114,6 +116,21 @@ export function createPlayController(ports: PlayControllerPorts): PlayController
     play?.player.anteNextRound();
   };
 
+  const cashOut = async () => {
+    const overlay = state.flow.kind === "table" ? state.flow.overlay.kind : null;
+    if (overlay !== "results" && overlay !== "receipt") return;
+    if (play !== null) {
+      cashOutOfLastPlay = play.cashOut;
+      play.close();
+      play = null;
+    }
+    if (cashOutOfLastPlay === null) return;
+    dispatch({ kind: "cashOutStarted" });
+    const receipt = await cashOutOfLastPlay();
+    if (!receipt.ok) console.warn(`[cashOut] ${receipt.reason}`);
+    dispatch({ kind: "cashOutEnded", receipt: receipt.ok ? receipt.value : { kind: "untouched", reason: receipt.reason } });
+  };
+
   const handleKey = (event: KeyboardEvent) => {
     if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.code === "KeyH") return dispatch({ kind: "toggleDrawer", drawer: "help" });
@@ -138,6 +155,7 @@ export function createPlayController(ports: PlayControllerPorts): PlayController
     goHome: () => dispatch({ kind: "goHome" }),
     playNow: (buyInChips) => void playNow(buyInChips),
     anteAgain,
+    cashOut: () => void cashOut(),
     toggleDrawer: (drawer) => dispatch({ kind: "toggleDrawer", drawer }),
     closeDrawer: () => dispatch({ kind: "closeDrawer" }),
     clickTable,

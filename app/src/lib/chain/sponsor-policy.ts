@@ -1,7 +1,7 @@
 import { BN, BorshInstructionCoder, type Idl } from "@coral-xyz/anchor";
 import { EPHEMERAL_SPL_TOKEN_PROGRAM_ID, deriveEphemeralAta } from "@magicblock-labs/ephemeral-rollups-sdk";
 import gplSessionIdl from "@magicblock-labs/gum-sdk/lib/idl/gpl_session.json";
-import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { ComputeBudgetInstruction, ComputeBudgetProgram, type PublicKey, Transaction, type TransactionInstruction } from "@solana/web3.js";
 import { Buffer } from "buffer";
 import { BASE_COMPUTE_UNITS, SANDWICH_PROGRAM_ID, SESSION_PROGRAM_ID } from "./config";
@@ -18,6 +18,7 @@ const ESPL_INIT_EPHEMERAL_ATA = 0;
 const ESPL_DELEGATE_EPHEMERAL_ATA = 4;
 const ESPL_DELEGATE_SHUTTLE = 13;
 const ESPL_SETUP_AND_DELEGATE_SHUTTLE_WITH_MERGE = 24;
+const ESPL_WITHDRAW_THROUGH_DELEGATED_SHUTTLE_WITH_MERGE = 26;
 const PUBLIC_KEY_BYTES = 32;
 
 type InstructionRule = {
@@ -158,6 +159,19 @@ const INSTRUCTION_RULES: InstructionRule[] = [
     sponsorSlots: [0],
     walletSlot: 5,
     findRefusal: (instruction, policy) => requireKey(instruction, 14, policy.testMint, "the deposit mint"),
+  },
+  {
+    label: "withdraw_shuttle",
+    programId: EPHEMERAL_SPL_TOKEN_PROGRAM_ID,
+    matches: hasTag(ESPL_WITHDRAW_THROUGH_DELEGATED_SHUTTLE_WITH_MERGE, [13, 13 + PUBLIC_KEY_BYTES]),
+    minimumAccounts: 16,
+    sponsorSlots: [0],
+    walletSlot: 5,
+    needsWalletSignature: true,
+    findRefusal: (instruction, policy) =>
+      requireKey(instruction, 14, policy.testMint, "the withdrawal mint") ?? requireKey(instruction, 15, TOKEN_PROGRAM_ID, "the token program"),
+    findWalletRefusal: (instruction, wallet, policy) =>
+      requireKey(instruction, 13, getAssociatedTokenAddressSync(policy.testMint, wallet), "the withdrawal destination"),
   },
   {
     label: "redelegate_shuttle",
