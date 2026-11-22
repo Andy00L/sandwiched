@@ -96,6 +96,10 @@ export function createGuestPlayChain({ client, wallet, table, tableSnapshot, key
     startRound: seatActions.startRound,
     landSwat: seatActions.landSwat,
     settle: seatActions.settle,
+    evictSeat: async (seatWallet) => {
+      const paidOut = await seatActions.evictSeat(seatWallet, true);
+      return paidOut.ok ? paidOut : seatActions.evictSeat(seatWallet, false);
+    },
   };
 
   return { guest: { readFacts, run }, actions, needs };

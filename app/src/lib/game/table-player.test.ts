@@ -27,8 +27,9 @@ const createRecordingActions = () => {
     peck: record("peck"),
     raiseHand: async (boxIndex) => (calls.push(`raiseHand:${boxIndex}`), OK_ACK),
     startRound: record("startRound"),
-    landSwat: async (wallets: PublicKey[]) => (calls.push(`landSwat:${wallets.length}`), OK_ACK),
-    settle: async (wallets: PublicKey[]) => (calls.push(`settle:${wallets.length}`), OK_ACK),
+    landSwat: async (seats: PublicKey[]) => (calls.push(`landSwat:${seats.length}`), OK_ACK),
+    settle: async (seats: PublicKey[]) => (calls.push(`settle:${seats.length}`), OK_ACK),
+    evictSeat: async (wallet: PublicKey) => (calls.push(`evictSeat:${wallet.toBase58()}`), OK_ACK),
   };
   return { actions, calls };
 };

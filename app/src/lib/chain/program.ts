@@ -149,6 +149,19 @@ export const buildCashOutInstruction = (program: SandwichProgram, actor: SeatAct
     })
     .instruction();
 
+export const buildEvictSeatInstruction = (program: SandwichProgram, table: PublicKey, mint: PublicKey, wallet: PublicKey, paysOut: boolean) =>
+  program.methods
+    .evictSeat()
+    .accountsStrict({
+      table,
+      seat: findSeatAddress(table, wallet),
+      custody: findCustodyAddress(table),
+      walletToken: paysOut ? findWalletTokenAddress(wallet, mint) : null,
+      escrowToken: findEscrowTokenAddress(table, mint),
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .instruction();
+
 export const buildStartRoundInstruction = (program: SandwichProgram, payer: PublicKey, table: PublicKey) =>
   program.methods
     .startRound()

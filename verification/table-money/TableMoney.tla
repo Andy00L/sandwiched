@@ -1,14 +1,15 @@
 ----------------------------- MODULE TableMoney -----------------------------
 \* A guest's chips at one table, step for step as programs/sandwich/src/lib.rs moves them:
 \* join, leave, buy_in, cash_out, ante, withdraw_ante, start_round, on_whale_drawn,
-\* cancel_draw, settle, abort_round, close_round; the start rule is can_start_round in
-\* crates/sandwich-rules/src/draw.rs. Guest "A" is followed; "B" may or may not play.
+\* cancel_draw, settle, abort_round, close_round, evict_seat; the start rule is can_start_round in
+\* crates/sandwich-rules/src/draw.rs. Guest "A" is followed; "B" and "C" may or may not play, so a seat can sit out a live round.
 \* Each action is one instruction, so one transaction: it lands whole or not at all.
 EXTENDS Naturals, FiniteSets
 
-CONSTANTS WithdrawAnteExists, AbortExists
+CONSTANTS WithdrawAnteExists, AbortExists, EvictExists, EvictPaysOwner
 
-Players == {"A", "B"}
+Players == {"A", "B", "C"}
+Others == Players \ {"A"}
 ANTE == 1          \* CHIPS_PER_ANTE, one unit here
 BUY == 1
 START_TOKENS == 1
@@ -19,7 +20,7 @@ VARIABLES wallet, chips, seated, anted, phase, lobbyTimeUp, roundOver, settleWin
 vars == <<wallet, chips, seated, anted, phase, lobbyTimeUp, roundOver, settleWindowOver, settleWorks, wantsOut>>
 clocks == <<lobbyTimeUp, roundOver, settleWindowOver, settleWorks>>
 
-Escrow == chips["A"] + chips["B"] + Cardinality(anted) * ANTE
+Escrow == chips["A"] + chips["B"] + chips["C"] + Cardinality(anted) * ANTE
 
 Init ==
   /\ wallet = [p \in Players |-> START_TOKENS]
@@ -117,9 +118,17 @@ AbortRound ==
   /\ lobbyTimeUp' = FALSE /\ roundOver' = FALSE /\ settleWindowOver' = FALSE /\ settleWorks' = TRUE
   /\ UNCHANGED <<wallet, seated, wantsOut>>
 
+\* evict_seat: anyone; Live; seated; not anted; every chip back to the owner's token account; the place opens
+EvictSeat(p) ==
+  /\ EvictExists /\ phase = "live" /\ seated[p] /\ p \notin anted
+  /\ wallet' = (IF EvictPaysOwner THEN [wallet EXCEPT ![p] = @ + chips[p]] ELSE wallet)
+  /\ chips' = [chips EXCEPT ![p] = 0]
+  /\ seated' = [seated EXCEPT ![p] = FALSE]
+  /\ UNCHANGED <<anted, phase, wantsOut>> /\ UNCHANGED clocks
+
 GuestSteps == Join("A") \/ Leave("A") \/ BuyIn("A") \/ CashOut("A") \/ Ante("A") \/ WithdrawAnte("A") \/ GuestWantsOut
-OtherSteps == Join("B") \/ Leave("B") \/ BuyIn("B") \/ CashOut("B") \/ Ante("B") \/ WithdrawAnte("B")
-OpenSteps == LobbyClockRunsOut \/ StartRound \/ WhaleDrawn \/ CancelDraw \/ RoundTimeRunsOut \/ SettleWindowRunsOut \/ Settle \/ AbortRound
+OtherSteps == \E p \in Others : Join(p) \/ Leave(p) \/ BuyIn(p) \/ CashOut(p) \/ Ante(p) \/ WithdrawAnte(p)
+OpenSteps == LobbyClockRunsOut \/ StartRound \/ WhaleDrawn \/ CancelDraw \/ RoundTimeRunsOut \/ SettleWindowRunsOut \/ Settle \/ AbortRound \/ (\E p \in Players : EvictSeat(p))
 
 GuestIsOut == wantsOut /\ wallet["A"] = START_TOKENS /\ chips["A"] = 0 /\ "A" \notin anted
 Done == GuestIsOut /\ UNCHANGED vars
@@ -127,7 +136,7 @@ Done == GuestIsOut /\ UNCHANGED vars
 Next == GuestSteps \/ OtherSteps \/ OpenSteps \/ Done
 
 \* Rule 1: no instruction creates or loses money.
-MoneyIsKept == wallet["A"] + wallet["B"] + Escrow = 2 * START_TOKENS
+MoneyIsKept == wallet["A"] + wallet["B"] + wallet["C"] + Escrow = 3 * START_TOKENS
 \* Rule 2: a guest who wants out always has a next step that needs no other player.
 GuestMoneyInGame == chips["A"] + (IF "A" \in anted THEN ANTE ELSE 0)
 CanGetOutAlone ==

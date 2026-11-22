@@ -210,6 +210,47 @@ pub mod sandwich {
         )
     }
 
+    /// Anyone may clear a seat that sat out the round in progress: its chips go back to the
+    /// owner's token account and its place opens, so a table never fills with absent guests.
+    pub fn evict_seat(ctx: Context<EvictSeat>) -> Result<()> {
+        require!(matches!(ctx.accounts.table.phase, Phase::Live { .. }), SandwichError::WrongPhase);
+        let seat_index = seated_index(&ctx.accounts.table, &ctx.accounts.seat)?;
+        require!(!is_anted(ctx.accounts.table.anted, seat_index), SandwichError::StillInRound);
+        let chips = ctx.accounts.seat.chips;
+        if chips > 0 {
+            let wallet_token = ctx.accounts.wallet_token.as_ref().ok_or(SandwichError::WrongTokenAccount)?;
+            let units = chips
+                .checked_mul(ctx.accounts.table.chip_units)
+                .ok_or(SandwichError::MathOverflow)?;
+            let table_key = ctx.accounts.table.key();
+            let custody_seeds: &[&[u8]] =
+                &[CUSTODY_SEED, table_key.as_ref(), &[ctx.accounts.table.custody_bump]];
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.key(),
+                    Transfer {
+                        from: ctx.accounts.escrow_token.to_account_info(),
+                        to: wallet_token.to_account_info(),
+                        authority: ctx.accounts.custody.to_account_info(),
+                    },
+                    &[custody_seeds],
+                ),
+                units,
+            )?;
+        }
+        let listed = ctx
+            .accounts
+            .table
+            .seats
+            .get_mut(usize::from(seat_index))
+            .ok_or(SandwichError::NotSeated)?;
+        *listed = Pubkey::default();
+        let seat = &mut ctx.accounts.seat;
+        seat.chips = 0;
+        seat.seat_index = None;
+        Ok(())
+    }
+
     #[session_auth_or(
         ctx.accounts.seat.wallet == ctx.accounts.signer.key(),
         SandwichError::NotSeatOwner

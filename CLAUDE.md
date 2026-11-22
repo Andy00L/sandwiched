@@ -24,7 +24,7 @@ Each rule names what enforces it. A rule with "judgment" has no check: it is the
 | No allocation per frame in `app/src/lib/table/replay` and `motion`: no `new THREE.*`, `.clone()`, `new Map`/`Set` outside `build*`/`create*`/`print*`/`make*` functions or inside `onStep` | lint `NO_ALLOCATION_PER_FRAME` |
 | Only `app/src/lib/table/motion/verbs.ts` writes `.scale` | lint `SCALE_ONLY_IN_VERBS` |
 | No `useEffect`, no `as unknown as`, no `any`, no `@ts-ignore`, no single-letter names | lint (`no-restricted-syntax`, `no-restricted-imports`, `id-length`, typescript-eslint) |
-| The program's funds paths (buy-in, cash-out, ante, withdraw_ante, settle, abort_round, cancel_draw) keep their MagicSVM tests green | CI job `program` |
+| The program's funds paths (buy-in, cash-out, ante, withdraw_ante, settle, abort_round, cancel_draw, evict_seat) keep their MagicSVM tests green | CI job `program` |
 | A guest who wants out can always get their chips back alone; no instruction creates or loses chips | TLA+ `verification/table-money` (CI job `models`); skill `table-money` |
 | A pigeon's body matches its chain pose after any mix of events and frames | Bun model check `app/src/lib/table/replay/pigeon-life.check.test.ts`; skill `pigeon-life` |
 | A deposit's record outlives every state where its tokens can still land or sit unmerged in the shuttle, across crashes, reloads, two tabs and balance moves | Bun check `app/src/lib/chain/deposits.check.test.ts` (`verification/deposit-shuttle/check.sh`, CI job `app`), breaks in `verification/deposit-shuttle/prove-breaks.sh`; skill `deposit-shuttle` |

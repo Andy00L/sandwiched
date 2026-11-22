@@ -141,6 +141,30 @@ pub struct CashOut<'info> {
     pub session_token: Option<Account<'info, SessionTokenV2>>,
 }
 
+#[derive(Accounts)]
+pub struct EvictSeat<'info> {
+    #[account(mut)]
+    pub table: Box<Account<'info, Table>>,
+    #[account(
+        mut,
+        seeds = [SEAT_SEED, table.key().as_ref(), seat.wallet.as_ref()],
+        bump = seat.bump
+    )]
+    pub seat: Account<'info, Seat>,
+    /// CHECK: data-less address that owns the escrow token account and signs payouts.
+    #[account(seeds = [CUSTODY_SEED, table.key().as_ref()], bump = table.custody_bump)]
+    pub custody: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        constraint = wallet_token.owner == seat.wallet @ SandwichError::WrongTokenAccount,
+        constraint = wallet_token.mint == table.mint @ SandwichError::WrongTokenAccount
+    )]
+    pub wallet_token: Option<Box<Account<'info, TokenAccount>>>,
+    #[account(mut, address = table.escrow @ SandwichError::WrongTokenAccount)]
+    pub escrow_token: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
 #[vrf]
 #[derive(Accounts)]
 pub struct StartRound<'info> {

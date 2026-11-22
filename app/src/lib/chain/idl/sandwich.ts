@@ -765,6 +765,92 @@ export type Sandwich = {
       "args": []
     },
     {
+      "name": "evictSeat",
+      "docs": [
+        "Anyone may clear a seat that sat out the round in progress: its chips go back to the",
+        "owner's token account and its place opens, so a table never fills with absent guests."
+      ],
+      "discriminator": [
+        232,
+        165,
+        194,
+        88,
+        233,
+        155,
+        82,
+        197
+      ],
+      "accounts": [
+        {
+          "name": "table",
+          "writable": true
+        },
+        {
+          "name": "seat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              },
+              {
+                "kind": "account",
+                "path": "seat.wallet",
+                "account": "seat"
+              }
+            ]
+          }
+        },
+        {
+          "name": "custody",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "table"
+              }
+            ]
+          }
+        },
+        {
+          "name": "walletToken",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "escrowToken",
+          "writable": true
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "faucet",
       "discriminator": [
         0,

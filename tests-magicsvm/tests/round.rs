@@ -1010,3 +1010,56 @@ fn cancel_draw_refunds_antes_and_refuses_the_late_draw() {
     }
     assert!(matches!(lab.table(&table).phase, Phase::Lobby { .. }));
 }
+
+fn evict_seat_ix(lab: &Lab, table: &Pubkey, wallet: &Pubkey, pays_out: bool) -> Instruction {
+    program_ix(
+        instruction::EvictSeat {},
+        accounts::EvictSeat {
+            table: *table,
+            seat: seat_pda(table, wallet),
+            custody: custody_pda(table),
+            wallet_token: pays_out.then(|| ata_of(wallet, &lab.mint)),
+            escrow_token: ata_of(&custody_pda(table), &lab.mint),
+            token_program: token_program_key(),
+        },
+    )
+}
+
+#[test]
+fn evict_seat_pays_a_seat_that_sat_out_back_to_its_owner_and_opens_its_place() {
+    let mut lab = Lab::boot();
+    let table = lab.create_table(10);
+    let players = seated_players(&mut lab, &table, 4);
+    let (playing, idler, broke) = (&players[..2], &players[2], &players[3]);
+    join_buy_in_and_ante(&mut lab, &table, playing);
+    lab.send(ROLLUP, &[idler.signer()], &[seat_action_ix(instruction::Join {}, &table, idler)], "join");
+    lab.send(ROLLUP, &[&idler.wallet], &[buy_in_ix(&lab, &table, idler, BUY_IN_CHIPS)], "buy_in");
+    lab.send(ROLLUP, &[broke.signer()], &[seat_action_ix(instruction::Join {}, &table, broke)], "join");
+    let idler_units = lab.token_units(ROLLUP, &ata_of(&idler.key(), &lab.mint));
+    let stranger = Keypair::new();
+    lab.send_refused(ROLLUP, &[&stranger], &[evict_seat_ix(&lab, &table, &idler.key(), true)], error_code(SandwichError::WrongPhase), "evict in the lobby");
+
+    let admin = lab.admin.insecure_clone();
+    lab.svm.set_vrf_randomness(Some(whale_randomness(1, 0)));
+    lab.svm.warp_to_slot(lab.slot() + rule_timing().lobby_ticks);
+    lab.send(ROLLUP, &[&admin], &[start_round_ix(&lab, &table)], "start_round");
+    lab.svm.warp_to_slot(lab.slot() + 1);
+    assert!(matches!(lab.table(&table).phase, Phase::Live { .. }));
+
+    lab.send_refused(ROLLUP, &[&stranger], &[evict_seat_ix(&lab, &table, &playing[0].key(), true)], error_code(SandwichError::StillInRound), "evict a seat in the round");
+    lab.send_refused(ROLLUP, &[&stranger], &[evict_seat_ix(&lab, &table, &idler.key(), false)], error_code(SandwichError::WrongTokenAccount), "evict chips without a token account");
+    let evict_cu = lab.send(ROLLUP, &[&stranger], &[evict_seat_ix(&lab, &table, &idler.key(), true)], "evict_seat");
+    lab.send(ROLLUP, &[&stranger], &[evict_seat_ix(&lab, &table, &broke.key(), false)], "evict_seat without chips");
+
+    let after = lab.table(&table);
+    let idler_seat = lab.seat(&table, &idler.key());
+    assert_eq!(idler_seat.chips, 0);
+    assert!(idler_seat.seat_index.is_none());
+    assert!(lab.seat(&table, &broke.key()).seat_index.is_none());
+    assert!(!after.seats.contains(&idler.key()) && !after.seats.contains(&broke.key()));
+    assert_eq!(lab.token_units(ROLLUP, &ata_of(&idler.key(), &lab.mint)), idler_units + BUY_IN_CHIPS * CHIP_UNITS);
+    assert_eq!(lab.token_units(ROLLUP, &ata_of(&custody_pda(&table), &lab.mint)), 2 * BUY_IN_CHIPS * CHIP_UNITS);
+    lab.send_refused(ROLLUP, &[&stranger], &[evict_seat_ix(&lab, &table, &idler.key(), true)], error_code(SandwichError::NotSeated), "evict twice");
+    lab.send(ROLLUP, &[idler.signer()], &[seat_action_ix(instruction::Join {}, &table, idler)], "join again");
+    println!("[evict_seat_pays_a_seat_that_sat_out_back_to_its_owner_and_opens_its_place] cu evict_seat={evict_cu}");
+}

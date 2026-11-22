@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Model-check TableMoney.tla: the current program must pass; each config named after a removed exit must fail.
+# Model-check TableMoney.tla: the current program must pass; each config named after a removed exit or a broken payout must fail.
 # Needs Java 11+ and TLA2TOOLS pointing at tla2tools.jar (v1.7.4).
 set -eu
 cd "$(dirname "$0")"
@@ -16,4 +16,5 @@ check() {
 check current pass
 check no-withdraw-ante fail
 check no-abort fail
+check evict-without-payout fail
 echo "[tableMoney] ok"

@@ -2,7 +2,7 @@ import type { PublicKey } from "@solana/web3.js";
 import type { TableSnapshot } from "../chain/accounts";
 import type { RollupAck } from "../chain/transport";
 import { type ClickTarget, type PlayerIntent, intentForClick } from "./click-intent";
-import { type Crank, chooseCrank, describeCrank } from "./cranks";
+import { type Crank, NO_ROUNDS_SAT_OUT, chooseCrank, countRoundsSatOut, describeCrank } from "./cranks";
 import { type GuestChain, type GuestNeeds, type GuestStage, prepareGuest } from "./guest-steps";
 import type { RoundTiming } from "./round-events";
 import type { PigeonIntent, TableStore } from "./table-store";
@@ -12,6 +12,7 @@ const CRANK_RETRY_MS = 3_000;
 const GUEST_MAX_ATTEMPTS_PER_STEP = 6;
 const GUEST_RETRY_DELAY_MS = 1_500;
 const GUEST_SETTLE_DELAY_MS = 1_200;
+const REJOIN_COOLDOWN_MS = 5_000;
 
 export type PlayerActions = {
   ante: () => Promise<RollupAck>;
@@ -22,6 +23,7 @@ export type PlayerActions = {
   startRound: () => Promise<RollupAck>;
   landSwat: (seats: PublicKey[]) => Promise<RollupAck>;
   settle: (seats: PublicKey[]) => Promise<RollupAck>;
+  evictSeat: (wallet: PublicKey) => Promise<RollupAck>;
 };
 
 export type TablePlayerPorts = {
@@ -58,6 +60,8 @@ function sendCrank(actions: PlayerActions, crank: Crank): Promise<RollupAck> {
       return actions.settle(crank.seats);
     case "landSwat":
       return actions.landSwat(crank.seats);
+    case "evictSeat":
+      return actions.evictSeat(crank.wallet);
   }
 }
 
@@ -71,6 +75,8 @@ export function startTablePlayer(ports: TablePlayerPorts): TablePlayer {
   const crankSentAtMs = new Map<string, number>();
   let stage: GuestStage = { kind: "preparing", step: "sit", attempt: 0 };
   let antedRound: bigint | null = null;
+  let roundsSatOut = NO_ROUNDS_SAT_OUT;
+  let lastPrepareStartMs = Number.NEGATIVE_INFINITY;
   let isStopped = false;
   let isDeciding = false;
 
@@ -89,7 +95,8 @@ export function startTablePlayer(ports: TablePlayerPorts): TablePlayer {
   };
 
   const crankWhenDue = async (table: TableSnapshot) => {
-    const crank = chooseCrank(table, store.chainTick(), timing);
+    roundsSatOut = countRoundsSatOut(roundsSatOut, table);
+    const crank = chooseCrank(table, store.chainTick(), timing, roundsSatOut, ports.wallet);
     if (crank === null) return;
     const key = describeCrank(crank);
     const sentAtMs = crankSentAtMs.get(key);
@@ -99,9 +106,33 @@ export function startTablePlayer(ports: TablePlayerPorts): TablePlayer {
     report(key, await sendCrank(actions, crank));
   };
 
+  const prepare = () => {
+    lastPrepareStartMs = performance.now();
+    stage = { kind: "preparing", step: "join", attempt: 0 };
+    void prepareGuest(ports.guest, {
+      needs: ports.needs,
+      maxAttemptsPerStep: GUEST_MAX_ATTEMPTS_PER_STEP,
+      retryDelayMs: GUEST_RETRY_DELAY_MS,
+      settleDelayMs: GUEST_SETTLE_DELAY_MS,
+      onStage: (next) => {
+        stage = next;
+        ports.onStage(next);
+      },
+      wait,
+      isStopped: () => isStopped,
+    });
+  };
+
+  const rejoinWhenEvicted = (table: TableSnapshot): boolean => {
+    if (findOwnSeatIndex(table, ports.wallet) !== null || performance.now() - lastPrepareStartMs < REJOIN_COOLDOWN_MS) return false;
+    prepare();
+    return true;
+  };
+
   const decide = async () => {
     const table = ports.readTable();
     if (isDeciding || isStopped || stage.kind !== "ready" || table === null) return;
+    if (rejoinWhenEvicted(table)) return;
     isDeciding = true;
     await anteWhenDue(table);
     await crankWhenDue(table);
@@ -109,18 +140,7 @@ export function startTablePlayer(ports: TablePlayerPorts): TablePlayer {
   };
 
   const decideTimer = setInterval(() => void decide(), DECIDE_INTERVAL_MS);
-  void prepareGuest(ports.guest, {
-    needs: ports.needs,
-    maxAttemptsPerStep: GUEST_MAX_ATTEMPTS_PER_STEP,
-    retryDelayMs: GUEST_RETRY_DELAY_MS,
-    settleDelayMs: GUEST_SETTLE_DELAY_MS,
-    onStage: (next) => {
-      stage = next;
-      ports.onStage(next);
-    },
-    wait,
-    isStopped: () => isStopped,
-  });
+  prepare();
 
   const perform = (intent: PlayerIntent) => {
     if (stage.kind !== "ready") return;

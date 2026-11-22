@@ -6,6 +6,7 @@ import {
   buildAnteInstruction,
   buildBuyInInstruction,
   buildCashOutInstruction,
+  buildEvictSeatInstruction,
   buildFaucetInstructions,
   buildFlyToInstruction,
   buildJoinInstruction,
@@ -72,6 +73,7 @@ export type SeatActions = {
   startRound: () => Promise<RollupAck>;
   landSwat: (seats: PublicKey[]) => Promise<RollupAck>;
   settle: (seats: PublicKey[]) => Promise<RollupAck>;
+  evictSeat: (wallet: PublicKey, paysOut: boolean) => Promise<RollupAck>;
 };
 
 export type SeatActionsSetup = {
@@ -120,5 +122,6 @@ export const createSeatActions = ({ client, table, mint, wallet, sessions }: Sea
     startRound: () => sendAsSession((actor) => buildStartRoundInstruction(program, actor.signer, table)),
     landSwat: (seats) => sendAsSession(() => buildLandSwatInstruction(program, table, seats)),
     settle: (seats) => sendAsSession(() => buildSettleInstruction(program, table, seats)),
+    evictSeat: (seatWallet, paysOut) => sendAsSession(() => buildEvictSeatInstruction(program, table, mint, seatWallet, paysOut)),
   };
 };
