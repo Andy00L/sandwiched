@@ -67,7 +67,7 @@ export const MOODS = {
  */
 export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, ground = '#d9d2c2', view: view0 = {}, testView = { dist: 38, target: [3, 1.5, -6] },
   heroHeight = 3.6, light = {}, lens = {}, walk: walkOpts = { step: 0.75, radius: 0.6 }, moods = MOODS, play = false, focus = null, mood = null, stock = '#f7f0e2', walkArea = null, camBox = null,
-  size = null, aspect = null, subject = null, rotate = false, renderScale = 1 } = {}) {
+  size = null, aspect = null, subject = null, rotate = false, renderScale = 1, foldOnClick = true } = {}) {
   const T0 = performance.now();
   // print costs by the scene line that asked for them: __papercraft.printStats() (and a console line when the build is
   // slow) says which pieces to print smaller (popup res), share (one print, many cards) or cut
@@ -520,7 +520,7 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
       view.tyaw = THREE.MathUtils.clamp(view.tyaw - e.movementX * 0.15, -12, 12);      // the world is filled where the camera
       view.tpitch = THREE.MathUtils.clamp(view.tpitch + e.movementY * 0.12, 40, 55);  // looks; never so low the far edge shows
     });
-    addEventListener('pointerup', () => { if (drag && drag.moved < 6) setOpen(!up); drag = null; });
+    addEventListener('pointerup', () => { if (foldOnClick && drag && drag.moved < 6) setOpen(!up); drag = null; });
 
     // walking (?walk): WASD / arrows move the hero over the walk field; the camera follows and refits the shadow map.
     // Movement as the source game moves its player: velocity approaches the wanted one at a constant rate (a snappy
@@ -537,7 +537,7 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
     let steering = null;             // steer(x, z): the wanted direction on the page, as if held on a stick
     const DIST0 = view.dist;
     if (flags.WALK) {
-      // physical keys (e.code: any layout, caps lock or shift), no modifier chords, all released when the page loses
+      // physical keys (e.code: every layout, caps lock or shift), no modifier chords, all released when the page loses
       // focus (a key let go in another window never sticks)
       addEventListener('keydown', (e) => { if (!KEYS[e.code] || e.metaKey || e.ctrlKey || e.altKey) return; keys.add(e.code); e.preventDefault(); });
       addEventListener('keyup', (e) => keys.delete(e.code));

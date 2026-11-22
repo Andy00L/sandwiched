@@ -33,11 +33,13 @@ QA         plan/06 section 9: F0 to F13 captured with restart(); step(T).
 import { createHarness } from "papercraft/harness.js";
 import type { Harness } from "papercraft/harness.js";
 import type { Object3D } from "three";
-import { openLiveRoundSource } from "../game/live-table";
+import type { GuestStage } from "../game/guest-steps";
+import { openLivePlay, openLiveRoundSource } from "../game/live-table";
+import type { TablePlayer } from "../game/table-player";
 import { createReplaySource, type RoundSource } from "../game/round-source";
 import { GROUND_INKS } from "./palette";
 import { placeOnTable } from "./layout";
-import { buildLunchbox, LUNCHBOX_LOOKS } from "./pieces/lunchbox";
+import { buildLunchbox, LUNCHBOX_LOOKS, type LunchboxModel } from "./pieces/lunchbox";
 import { buildLawnFillers } from "./pieces/lawn";
 import { buildCrumbScatter, buildLunchClutter } from "./pieces/lunch";
 import { buildFlowerBed, buildHedge, buildLampPost, buildLitterBin, buildParkBench, buildParkSign, buildPlaneTree } from "./pieces/park";
@@ -50,6 +52,7 @@ import type { WhaleFace } from "./pieces/whale-face";
 import { BOX_ROW_DECK_Z, BOX_SPACING_UNITS, boxAlong } from "./replay/perches";
 import { loadRecordedRound } from "./replay/recorded-rounds";
 import { buildReplayScene, REPLAY_LEAD_S } from "./replay/replay-scene";
+import { listenForBoxClicks } from "./stage/box-picking";
 import { recordFrameTimes } from "./stage/frame-recorder";
 import { buildParkLife } from "./stage/park-life";
 import { printParkGround } from "./stage/park-ground";
@@ -58,8 +61,9 @@ import { probeQualityTier, storedQuality } from "./stage/quality-probe";
 import { PAPER_STOCK, PARK_LENS, PARK_LIGHT, PARK_TEST_VIEW, PARK_VIEW, SCENE_FOCUS, TABLE_YAW_RAD, TEST_CARD_SPOT } from "./stage/look";
 
 const LIVE_TABLE_TIMEOUT_MS = 20_000;
+const PLAY_WAIT_MS = 600_000;
 
-type SceneMode = { kind: "sample" } | { kind: "rounds"; source: RoundSource };
+type SceneMode = { kind: "sample" } | { kind: "rounds"; source: RoundSource; player: TablePlayer | null };
 
 function buildTestCards(harness: Harness): void {
   const [outline, paint] = sittingPigeonCard();
@@ -93,7 +97,7 @@ function buildParkDressing(harness: Harness): void {
   buildFlowerBed(harness, 36, 9, 83);
 }
 
-function buildPark(harness: Harness, mode: SceneMode): void {
+function buildPark(harness: Harness, mode: SceneMode): readonly LunchboxModel[] {
   const picnicTable = buildPicnicTable(harness);
   const { table, deck, backBenchAcross } = picnicTable;
   const boxOrder = table.order + 0.6;
@@ -118,6 +122,7 @@ function buildPark(harness: Harness, mode: SceneMode): void {
     poseFaceWhenAsked(harness, whaleModel.face);
   }
   harness.setHero(whaleModel.whale);
+  return boxes;
 }
 
 const LINEUP_SPACING_UNITS = 4.6;
@@ -159,25 +164,36 @@ function poseFaceWhenAsked(harness: Harness, face: WhaleFace): void {
   });
 }
 
+function reportGuestStage(stage: GuestStage): void {
+  console.info(`[reportGuestStage] ${JSON.stringify(stage)}`);
+}
+
 async function readSceneMode(): Promise<SceneMode> {
   const params = new URLSearchParams(location.search);
   const tableAddress = params.get("table");
+  if (tableAddress && params.has("play")) {
+    const play = await openLivePlay(tableAddress, PLAY_WAIT_MS, reportGuestStage);
+    if (play.ok) return { kind: "rounds", source: play.value.source, player: play.value.player };
+    console.warn(`[readSceneMode] ${play.reason}`);
+    return { kind: "sample" };
+  }
   if (tableAddress) {
     const live = await openLiveRoundSource(tableAddress, LIVE_TABLE_TIMEOUT_MS);
-    if (live.ok) return { kind: "rounds", source: live.value };
+    if (live.ok) return { kind: "rounds", source: live.value, player: null };
     console.warn(`[readSceneMode] ${live.reason}`);
     return { kind: "sample" };
   }
   const replayName = params.get("replay");
   if (!replayName) return { kind: "sample" };
   const loaded = await loadRecordedRound(replayName);
-  if (loaded.ok) return { kind: "rounds", source: createReplaySource(loaded.round, REPLAY_LEAD_S) };
+  if (loaded.ok) return { kind: "rounds", source: createReplaySource(loaded.round, REPLAY_LEAD_S), player: null };
   console.warn(`[readSceneMode] ${loaded.reason}`);
   return { kind: "sample" };
 }
 
 export async function buildTableScene(): Promise<void> {
   const mode = await readSceneMode();
+  const player = mode.kind === "rounds" ? mode.player : null;
   const quality = storedQuality();
   const harness = createHarness({
     ground: GROUND_INKS.lawn,
@@ -188,10 +204,14 @@ export async function buildTableScene(): Promise<void> {
     lens: { ...PARK_LENS, taps: quality.dofTaps, msaa: quality.msaa },
     focus: SCENE_FOCUS,
     renderScale: quality.renderScale,
+    foldOnClick: player === null,
   });
   harness.printGround((tools) => printParkGround(tools, harness.bounds));
   if (harness.flags.TEST) buildTestCards(harness);
-  else buildPark(harness, mode);
+  else {
+    const boxes = buildPark(harness, mode);
+    if (player !== null) listenForBoxClicks(harness, boxes, player.click);
+  }
   trimHiddenBacksOnceRisen(harness);
   harness.start();
   probeQualityTier(harness);

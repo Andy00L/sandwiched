@@ -82,6 +82,7 @@ export interface HarnessOptions {
   stock?: string;
   subject?: Point | Vector3Tuple | null;
   renderScale?: number;
+  foldOnClick?: boolean;
 }
 
 export interface GroundTools {
