@@ -27,6 +27,8 @@ Each rule names what enforces it. A rule with "judgment" has no check: it is the
 | The program's funds paths (buy-in, cash-out, ante, withdraw_ante, settle, abort_round, cancel_draw) keep their MagicSVM tests green | CI job `program` |
 | A guest who wants out can always get their chips back alone; no instruction creates or loses chips | TLA+ `verification/table-money` (CI job `models`); skill `table-money` |
 | A pigeon's body matches its chain pose after any mix of events and frames | Bun model check `app/src/lib/table/replay/pigeon-life.check.test.ts`; skill `pigeon-life` |
+| The table store publishes the rounds the chain played (seats, whale, swats, settle split, beaks) however its snapshots are polled, coalesced, delayed, duplicated or restarted | Bun check `app/src/lib/game/table-store.check.test.ts` (`verification/table-store/check.sh`), breaks in `verification/table-store/mutants.ts`; skill `table-store` |
+| A watched account shows fresh chain data, or the feed status leaves `live`, through any order of socket, RPC and timer events | Bun model check `app/src/lib/chain/account-feed.check.test.ts`, breaks in `verification/account-feed/prove-breaks.sh`; skill `account-feed` |
 | State that moves through stages is a discriminated union with one transition function, not flags plus scattered `if`s | judgment, then a formal check per subsystem (`.claude/skills/*`) |
 | The app's IDL copy matches the built program | `app/src/lib/chain/idl-sync.test.ts` |
 | No card cuts into another on the hero; a known crossing needs an entry in `app/accepted-clips.json` with reason, depth, expiry and a human approver | `tools/papercraft/capture.py` exit code |
