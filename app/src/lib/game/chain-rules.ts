@@ -14,11 +14,11 @@ const DRAW_TIMEOUT_MS = 5_000;
 const HIDE_MS = 5_000;
 const ROUND_MS = 45_000;
 const FLIGHT_MS = 500;
-const PECK_COOLDOWN_MS = 300;
+const PECK_COOLDOWN_MS = 250;
 const EMPTY_BOX_STUN_MS = 2_000;
 const SWAT_WINDUP_MS = 350;
-const SWAT_COOLDOWN_MS = 900;
-const SWAT_STUN_MS = 1_500;
+const SWAT_COOLDOWN_MS = 2_600;
+const SWAT_STUN_MS = 1_000;
 const SWITCH_COOLDOWN_MS = 8_000;
 
 function convertMsToTicks(durationMs: number): number {

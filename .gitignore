@@ -6,6 +6,7 @@ dist/
 .anchor/
 test-ledger/
 .scratch/
+app/frames/
 .claude/
 ui-design/
 .env*

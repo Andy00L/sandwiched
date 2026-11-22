@@ -102,3 +102,63 @@ impl core::fmt::Display for RoundSummary {
         Ok(())
     }
 }
+
+pub struct BalanceSummary {
+    pub rounds: usize,
+    pub whale_share_mean: f64,
+    pub whale_share_spread: f64,
+    pub swats_mean: f64,
+    pub emptied_early_share: f64,
+    pub crumbs_per_temperament: Vec<(Temperament, f64)>,
+}
+
+fn whale_share(summary: &RoundSummary) -> f64 {
+    if summary.anted_crumbs == 0 {
+        return 1.0;
+    }
+    summary.whale_crumbs as f64 / summary.anted_crumbs as f64
+}
+
+pub fn summarize_rounds(summaries: &[RoundSummary]) -> BalanceSummary {
+    let count = summaries.len().max(1) as f64;
+    let shares: Vec<f64> = summaries.iter().map(whale_share).collect();
+    let mean = shares.iter().sum::<f64>() / count;
+    let spread = (shares.iter().map(|share| (share - mean).powi(2)).sum::<f64>() / count).sqrt();
+    let crumbs_per_temperament = TEMPERAMENTS
+        .iter()
+        .map(|temperament| {
+            let (crumbs, pigeons) = summaries
+                .iter()
+                .flat_map(|summary| summary.per_temperament.iter())
+                .filter(|entry| entry.temperament == *temperament)
+                .fold((0_u64, 0_usize), |(crumbs, pigeons), entry| (crumbs + entry.crumbs, pigeons + entry.pigeon_count));
+            (*temperament, crumbs as f64 / pigeons.max(1) as f64)
+        })
+        .collect();
+    BalanceSummary {
+        rounds: summaries.len(),
+        whale_share_mean: mean,
+        whale_share_spread: spread,
+        swats_mean: summaries.iter().map(|summary| summary.swat_count as f64).sum::<f64>() / count,
+        emptied_early_share: summaries.iter().filter(|summary| summary.whale_crumbs == 0).count() as f64 / count,
+        crumbs_per_temperament,
+    }
+}
+
+impl core::fmt::Display for BalanceSummary {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            formatter,
+            "{} rounds, whale keeps {:.1}% (spread {:.1}), {:.1} swats, pot emptied {:.1}%",
+            self.rounds,
+            self.whale_share_mean * 100.0,
+            self.whale_share_spread * 100.0,
+            self.swats_mean,
+            self.emptied_early_share * 100.0,
+        )?;
+        for (temperament, crumbs) in &self.crumbs_per_temperament {
+            write!(formatter, ", {temperament:?} {crumbs:.1} crumbs")?;
+        }
+        Ok(())
+    }
+}

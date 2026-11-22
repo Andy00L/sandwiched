@@ -26,6 +26,11 @@ const PIGEON_NAMES: [&str; 6] = ["Gary", "Linda", "Doug", "Brenda", "Keith", "Sh
 pub struct RoundConfig {
     pub players: u8,
     pub seed: u64,
+    pub timing: Timing,
+}
+
+pub fn standard_timing() -> Result<Timing, SimulationError> {
+    Timing::from_tick_ms(TICK_MS).map_err(|error| rule_failure("timing", 0, error))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,7 +88,7 @@ struct LiveTable {
 }
 
 pub fn simulate_round(config: RoundConfig) -> Result<RecordedRound, SimulationError> {
-    let timing = Timing::from_tick_ms(TICK_MS).map_err(|error| rule_failure("timing", 0, error))?;
+    let timing = config.timing;
     let mut random = SeededRandom::from_seed(config.seed);
     let seat_plans = plan_seats(config.players, &mut random);
     let lobby = play_lobby(&seat_plans, &mut random);
@@ -417,7 +422,7 @@ mod tests {
 
     #[test]
     fn the_same_arguments_give_a_byte_identical_file() {
-        let config = RoundConfig { players: 8, seed: 7 };
+        let config = RoundConfig { players: 8, seed: 7, timing: standard_timing().expect("standard timing") };
         let first = simulate_round(config).map(|round| render_round_file(&round).ok());
         let second = simulate_round(config).map(|round| render_round_file(&round).ok());
         assert!(matches!(first, Ok(Some(_))));
@@ -428,7 +433,7 @@ mod tests {
     fn every_table_size_plays_to_a_conserved_settlement() {
         for players in 2..=21u8 {
             for seed in 0..3u64 {
-                let recorded = simulate_round(RoundConfig { players, seed });
+                let recorded = simulate_round(RoundConfig { players, seed, timing: standard_timing().expect("standard timing") });
                 let last_event = recorded.as_ref().ok().and_then(|round| round.events.last());
                 let Some(TimedEvent {
                     event: RoundEvent::Settled { whale_crumbs, pigeon_crumbs, .. },

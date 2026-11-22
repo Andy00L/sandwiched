@@ -153,6 +153,10 @@ function isSettleOf(table: TableSnapshot, roundNumber: number): boolean {
   return table.lastResult !== null && Number(table.lastResult.roundNumber) === roundNumber;
 }
 
+function isAbortOf(table: TableSnapshot, roundNumber: number): boolean {
+  return Number(table.roundNumber) > roundNumber && !isSettleOf(table, roundNumber);
+}
+
 function answersPrediction(prediction: Prediction, event: RoundEvent): boolean {
   const seat = prediction.event.seat;
   if (event.tick <= prediction.afterTick) return false;
@@ -297,7 +301,7 @@ export function createTableStore(options: TableStoreOptions): TableStore {
     if (afterEnd.length === 0) return null;
     if (now() - Math.min(...afterEnd.map((change) => change.arrivedAtMs)) >= SETTLE_WAIT_MS) return null;
     const settle = afterEnd.find((change) => change.kind === "table" && isSettleOf(change.snapshot, round.roundNumber));
-    if (settle === undefined) return endTick;
+    if (settle === undefined) return afterEnd.some((change) => change.kind === "table" && isAbortOf(change.snapshot, round.roundNumber)) ? null : endTick;
     const hasSeatAtSettle = (seatIndex: number) =>
       (applied.seats.get(seatIndex)?.slot ?? -1) >= settle.slot ||
       afterEnd.some((change) => change.kind === "seat" && change.snapshot.seatIndex === seatIndex && change.slot >= settle.slot);

@@ -77,6 +77,13 @@ const SCRATCH_BREAKS: readonly ScratchBreak[] = [
     breaks: "a settle is applied before the seat snapshots it wrote arrive (finding 2)",
   },
   {
+    name: "abort-waits-for-settle",
+    file: "src/lib/game/table-store.ts",
+    find: "return afterEnd.some((change) => change.kind === \"table\" && isAbortOf(change.snapshot, round.roundNumber)) ? null : endTick;",
+    replace: "return endTick;",
+    breaks: "a round aborted past its end tick holds every later change waiting for a settle that never comes (finding 4)",
+  },
+  {
     name: "settle-raises-skipped",
     file: "src/lib/game/snapshot-diff.ts",
     find: 'if (table.phase.state !== "live" && !isSettlement(previousTable, table)) return [];',

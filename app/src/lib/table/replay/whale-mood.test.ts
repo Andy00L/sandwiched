@@ -5,7 +5,9 @@ import { parseRecordedRound } from "../../game/round-events";
 import { viewStateAt } from "../../game/view-state";
 import { createMoodGovernor, crowdedGlance, MOOD_HOLD_MS, moodForPotShare } from "./whale-mood";
 
-const BALANCED = parseRecordedRound(JSON.parse(readFileSync(join(import.meta.dir, "../../../../tests/rounds/balanced.json"), "utf8")));
+const ROUNDS_FOLDER = join(import.meta.dir, "../../../../tests/rounds");
+const RECORDED_ROUND_NAMES = ["balanced", "crowd", "duel", "pigeons-feast", "slam-showcase", "whale-keeps"] as const;
+const BALANCED = parseRecordedRound(JSON.parse(readFileSync(join(ROUNDS_FOLDER, "balanced.json"), "utf8")));
 
 describe("whale mood", () => {
   test("follows the pot thresholds of plan/06", () => {
@@ -39,17 +41,24 @@ describe("whale mood", () => {
     }
   });
 
-  test("looks toward the box with the most pigeons", () => {
-    expect(BALANCED.ok).toBe(true);
-    if (!BALANCED.ok) return;
-    const round = BALANCED.round;
-    const crowdedRight = round.events.find((event) => {
-      const view = viewStateAt(round, event.tick);
-      const onRightBox = view.seats.filter((seat) => seat.pigeon.state === "perched" && seat.pigeon.box === 2).length;
-      return onRightBox >= 3 && view.seats.every((seat) => seat.pigeon.state !== "perched" || seat.pigeon.box === 2);
+  test("looks toward an end box when every perched pigeon is there", () => {
+    const rounds = RECORDED_ROUND_NAMES.flatMap((name) => {
+      const parsed = parseRecordedRound(JSON.parse(readFileSync(join(ROUNDS_FOLDER, `${name}.json`), "utf8")));
+      return parsed.ok ? [parsed.round] : [];
     });
-    expect(crowdedRight).toBeDefined();
-    if (!crowdedRight) return;
-    expect(crowdedGlance(viewStateAt(round, crowdedRight.tick), round.boxCount)).toBe("right");
+    expect(rounds).toHaveLength(RECORDED_ROUND_NAMES.length);
+    const crowdedEnd = rounds.flatMap((round) => {
+      const lastBox = round.boxCount - 1;
+      return round.events.flatMap((event) => {
+      const perched = viewStateAt(round, event.tick).seats.flatMap((seat) => (seat.role === "pigeon" && seat.pigeon.state === "perched" ? [seat.pigeon.box] : []));
+      const [firstBox] = perched;
+      const isOneEndBox = perched.length >= 2 && (firstBox === 0 || firstBox === lastBox) && perched.every((box) => box === firstBox);
+        return isOneEndBox && firstBox !== undefined ? [{ round, tick: event.tick, box: firstBox }] : [];
+      });
+    });
+    expect(crowdedEnd.length).toBeGreaterThan(0);
+    for (const moment of crowdedEnd) {
+      expect(crowdedGlance(viewStateAt(moment.round, moment.tick), moment.round.boxCount)).toBe(moment.box === 0 ? "left" : "right");
+    }
   });
 });

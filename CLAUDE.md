@@ -8,7 +8,7 @@ Commands, from the repo root unless noted:
 | Rules crate and clippy | `cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked` |
 | Program build and MagicSVM tests | `cargo build-sbf --manifest-path programs/sandwich/Cargo.toml && (cd tests-magicsvm && cargo test --release --locked)` |
 | Table money model (TLA+) | `TLA2TOOLS=/path/to/tla2tools.jar verification/table-money/check.sh` |
-| Scene captures | `.scratch/pyvenv/bin/python tools/papercraft/capture.py app --url http://localhost:3000/stage --page "stage?replay=slam-showcase" f8:time=14.33` (exit 1 means a page error or a card clip: read it, never pipe it away) |
+| Scene captures | `.scratch/pyvenv/bin/python tools/papercraft/capture.py app --url http://localhost:3000/stage --page "stage?replay=slam-showcase" f8:time=6.35` (exit 1 means a page error or a card clip: read it, never pipe it away) |
 | Sync the IDL after a program change | `cd app && bun scripts/sync-idl.ts` |
 
 CI (`.github/workflows/ci.yml`) runs every command above except captures.
