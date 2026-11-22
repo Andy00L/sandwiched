@@ -33,3 +33,7 @@ export const HOVER_BOB_UNITS = 0.03 * PIGEON_HEIGHT_UNITS;
 export const HOVER_BOB_HZ = 1.6;
 
 export const REVEAL_LID_STAGGER_S = 0.12;
+
+export const TIMER_WEDGE_S = 10;
+export const TIMER_KICK_RAD = (2 * Math.PI) / 180;
+export const TIMER_KICK_DECAY_MS = 140;

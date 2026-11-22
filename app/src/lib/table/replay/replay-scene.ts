@@ -20,6 +20,8 @@ import {
   presentationTick,
   torsoLeanRad,
 } from "../motion/impact";
+import { timerKickRad, timerSweep, timerWedgeShare } from "../motion/round-clock";
+import { buildKitchenTimer } from "../pieces/kitchen-timer";
 import { crumbOutline, mothCard, paintCrumb, SANDWICH_BITE_STAGES, sandwichCard } from "../pieces/lunch";
 import { LUNCHBOX_DEPTH_UNITS, LUNCHBOX_HEIGHT_UNITS, LUNCHBOX_WIDTH_UNITS } from "../pieces/lunchbox";
 import type { LunchboxModel } from "../pieces/lunchbox";
@@ -69,6 +71,9 @@ const STRUCK_BOX_FOCUS_HEIGHT_UNITS = 1.6;
 const STRUCK_BOX_FOCUS_FRONT_UNITS = 1.4;
 const FOCUS_FOLLOW_PER_S = 18;
 const FOCUS_AT_BASE_UNITS = 0.01;
+const TIMER_ALONG_UNITS = -14.4;
+const TIMER_DECK_Z_UNITS = -12.2;
+const TIMER_YAW_RAD = 0.35;
 
 type ArmSide = "left" | "right";
 
@@ -182,7 +187,6 @@ function buildRevealBoxes(harness: Harness, deck: THREE.Object3D, boxes: readonl
 }
 
 function createSandwichPrints(harness: Harness, deck: THREE.Object3D, boxCount: number, order: number): SandwichPrints {
-  const materialsByStage = new Map<number, THREE.Material | THREE.Material[]>();
   const props = new Map<string, PlacedPiece>();
   return {
     propFor(boxIndex, biteStage) {
@@ -190,9 +194,7 @@ function createSandwichPrints(harness: Harness, deck: THREE.Object3D, boxCount: 
       const known = props.get(key);
       if (known) return known;
       const [outline, paint] = sandwichCard(biteStage);
-      const materials = materialsByStage.get(biteStage) ?? harness.printed(outline, paint);
-      materialsByStage.set(biteStage, materials);
-      const prop = harness.popup(outline, null, { ...revealPlacement(deck, boxIndex, boxCount, order), materials });
+      const prop = harness.popup(outline, paint, revealPlacement(deck, boxIndex, boxCount, order));
       prop.group.visible = false;
       markMoving(prop.group);
       props.set(key, prop);
@@ -240,6 +242,12 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
   const flipperShadow = buildFlipperShadow(harness, deck);
   const revealBoxes = buildRevealBoxes(harness, deck, boxes, order + 3);
   const sandwichPrints = createSandwichPrints(harness, deck, boxes.length, order + 3.2);
+  const timer = buildKitchenTimer(
+    harness,
+    deck,
+    { x: TIMER_ALONG_UNITS, z: TIMER_DECK_Z_UNITS, yaw: TIMER_YAW_RAD, order: order + 4 },
+    timerWedgeShare(timing.roundTicks * tickMs),
+  );
   const moodGovernor = createMoodGovernor();
   const angryTicksAfterLanding = ANGRY_AFTER_LANDING_MS / tickMs;
   const whistleTicks = (WHISTLE_S * 1000) / tickMs;
@@ -556,5 +564,7 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     feathers.place(presentTick, tickMs);
     playImpact(presentTick, nowTick);
     playReveal(presentTick, presentDt);
+    const endTick = view.endTick;
+    timer.pose(timerSweep(presentTick, endTick, timing.roundTicks), endTick === null ? 0 : timerKickRad((endTick - presentTick) * tickMs));
   });
 }
