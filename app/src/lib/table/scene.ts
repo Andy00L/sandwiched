@@ -33,7 +33,8 @@ QA         plan/06 section 9: F0 to F13 captured with restart(); step(T).
 import { createHarness } from "papercraft/harness.js";
 import type { Harness } from "papercraft/harness.js";
 import type { Object3D } from "three";
-import type { RecordedRound } from "../game/round-events";
+import { openLiveRoundSource } from "../game/live-table";
+import { createReplaySource, type RoundSource } from "../game/round-source";
 import { GROUND_INKS } from "./palette";
 import { placeOnTable } from "./layout";
 import { buildLunchbox, LUNCHBOX_LOOKS } from "./pieces/lunchbox";
@@ -48,7 +49,7 @@ import { WHALE_MOODS } from "./pieces/whale-face";
 import type { WhaleFace } from "./pieces/whale-face";
 import { BOX_ROW_DECK_Z, BOX_SPACING_UNITS, boxAlong } from "./replay/perches";
 import { loadRecordedRound } from "./replay/recorded-rounds";
-import { buildReplayScene } from "./replay/replay-scene";
+import { buildReplayScene, REPLAY_LEAD_S } from "./replay/replay-scene";
 import { recordFrameTimes } from "./stage/frame-recorder";
 import { buildParkLife } from "./stage/park-life";
 import { printParkGround } from "./stage/park-ground";
@@ -56,7 +57,9 @@ import { trimHiddenBacksOnceRisen } from "./stage/hidden-backs";
 import { probeQualityTier, storedQuality } from "./stage/quality-probe";
 import { PAPER_STOCK, PARK_LENS, PARK_LIGHT, PARK_TEST_VIEW, PARK_VIEW, SCENE_FOCUS, TABLE_YAW_RAD, TEST_CARD_SPOT } from "./stage/look";
 
-type SceneMode = { kind: "sample" } | { kind: "replay"; round: RecordedRound };
+const LIVE_TABLE_TIMEOUT_MS = 20_000;
+
+type SceneMode = { kind: "sample" } | { kind: "rounds"; source: RoundSource };
 
 function buildTestCards(harness: Harness): void {
   const [outline, paint] = sittingPigeonCard();
@@ -107,8 +110,8 @@ function buildPark(harness: Harness, mode: SceneMode): void {
   buildLawnFillers(harness);
   buildParkLife(harness);
 
-  if (mode.kind === "replay") {
-    buildReplayScene(harness, picnicTable, whaleModel, boxes, mode.round);
+  if (mode.kind === "rounds") {
+    buildReplayScene(harness, picnicTable, whaleModel, boxes, mode.source);
   } else {
     buildSamplePigeons(harness, deck, boxOrder + 0.8);
     buildCrumbScatter(harness, deck, 3.6, BOX_ROW_DECK_Z + 1.4, boxOrder + 1.2);
@@ -157,10 +160,18 @@ function poseFaceWhenAsked(harness: Harness, face: WhaleFace): void {
 }
 
 async function readSceneMode(): Promise<SceneMode> {
-  const replayName = new URLSearchParams(location.search).get("replay");
+  const params = new URLSearchParams(location.search);
+  const tableAddress = params.get("table");
+  if (tableAddress) {
+    const live = await openLiveRoundSource(tableAddress, LIVE_TABLE_TIMEOUT_MS);
+    if (live.ok) return { kind: "rounds", source: live.value };
+    console.warn(`[readSceneMode] ${live.reason}`);
+    return { kind: "sample" };
+  }
+  const replayName = params.get("replay");
   if (!replayName) return { kind: "sample" };
   const loaded = await loadRecordedRound(replayName);
-  if (loaded.ok) return { kind: "replay", round: loaded.round };
+  if (loaded.ok) return { kind: "rounds", source: createReplaySource(loaded.round, REPLAY_LEAD_S) };
   console.warn(`[readSceneMode] ${loaded.reason}`);
   return { kind: "sample" };
 }

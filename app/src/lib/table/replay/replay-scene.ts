@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { Harness, PlacedPiece } from "papercraft/harness.js";
 import * as P2 from "papercraft/lib/paperkit-2d.js";
 import { FlapSpring } from "papercraft/lib/paperkit-3d.js";
+import type { RoundSource } from "../../game/round-source";
 import type { HandRaisedEvent, RecordedRound } from "../../game/round-events";
 import { viewStateAt } from "../../game/view-state";
 import type { RoundViewState } from "../../game/view-state";
@@ -44,8 +45,9 @@ import { HAND_COCK_RAD, handCockAmount, makeRaisedHandPosition, slamHandPosition
 import type { HandPath } from "./slam";
 import { createMoodGovernor, crowdedGlance, glanceTowardBox } from "./whale-mood";
 
-const REPLAY_LEAD_S = 2.5;
+export const REPLAY_LEAD_S = 2.5;
 const WHISTLE_S = 0.4;
+const RESULTS_HOLD_S = 4;
 const CRUMB_BITS_PER_BOX = 16;
 const CRUMB_BITS_COUNTED_ONE_BY_ONE = 12;
 const CRUMBS_PER_LATER_BIT = 5;
@@ -96,9 +98,16 @@ interface SwatLanding {
 
 interface RevealBox {
   box: LunchboxModel;
+  boxIndex: number;
+  moth: PlacedPiece;
   prop: PlacedPiece;
   lidSpring: FlapSpring;
   hasOpened: boolean;
+}
+
+interface SandwichPrints {
+  propFor(boxIndex: number, biteStage: number): PlacedPiece;
+  hideAll(): void;
 }
 
 interface ArmSlam {
@@ -157,21 +166,42 @@ function buildCrumbBits(harness: Harness, deck: THREE.Object3D, boxCount: number
   });
 }
 
-function buildRevealBoxes(harness: Harness, deck: THREE.Object3D, boxes: readonly LunchboxModel[], round: RecordedRound, startingPot: number, order: number): RevealBox[] {
-  const sandwichBox = round.events.find((event) => event.kind === "whaleDrawn")?.sandwichBox ?? null;
+function revealPlacement(deck: THREE.Object3D, boxIndex: number, boxCount: number, order: number) {
+  return { parent: deck, x: boxAlong(boxIndex, boxCount), z: BOX_ROW_DECK_Z - LUNCHBOX_DEPTH_UNITS * 0.78, yaw: 0, order: order + boxIndex * 0.05 };
+}
+
+function buildRevealBoxes(harness: Harness, deck: THREE.Object3D, boxes: readonly LunchboxModel[], order: number): RevealBox[] {
   const [mothOutline, paintMoth] = mothCard();
   const mothMaterials = harness.printed(mothOutline, paintMoth);
-  const [sandwichOutline, paintSandwich] = sandwichCard(biteStageAtSettlement(round, startingPot));
   return boxes.map((box, boxIndex) => {
-    const placement = { parent: deck, x: boxAlong(boxIndex, boxes.length), z: BOX_ROW_DECK_Z - LUNCHBOX_DEPTH_UNITS * 0.78, yaw: 0, order: order + boxIndex * 0.05 };
-    const prop =
-      boxIndex === sandwichBox
-        ? harness.popup(sandwichOutline, paintSandwich, placement)
-        : harness.popup(mothOutline, null, { ...placement, materials: mothMaterials });
-    prop.group.visible = false;
-    markMoving(prop.group);
-    return { box, prop, lidSpring: new FlapSpring({ p: 0, size: 0.35 }), hasOpened: false };
+    const moth = harness.popup(mothOutline, null, { ...revealPlacement(deck, boxIndex, boxes.length, order), materials: mothMaterials });
+    moth.group.visible = false;
+    markMoving(moth.group);
+    return { box, boxIndex, moth, prop: moth, lidSpring: new FlapSpring({ p: 0, size: 0.35 }), hasOpened: false };
   });
+}
+
+function createSandwichPrints(harness: Harness, deck: THREE.Object3D, boxCount: number, order: number): SandwichPrints {
+  const materialsByStage = new Map<number, THREE.Material | THREE.Material[]>();
+  const props = new Map<string, PlacedPiece>();
+  return {
+    propFor(boxIndex, biteStage) {
+      const key = `${boxIndex}:${biteStage}`;
+      const known = props.get(key);
+      if (known) return known;
+      const [outline, paint] = sandwichCard(biteStage);
+      const materials = materialsByStage.get(biteStage) ?? harness.printed(outline, paint);
+      materialsByStage.set(biteStage, materials);
+      const prop = harness.popup(outline, null, { ...revealPlacement(deck, boxIndex, boxCount, order), materials });
+      prop.group.visible = false;
+      markMoving(prop.group);
+      props.set(key, prop);
+      return prop;
+    },
+    hideAll() {
+      for (const prop of props.values()) prop.group.visible = false;
+    },
+  };
 }
 
 function buildArmSlam(rig: ArmRig): ArmSlam {
@@ -183,10 +213,11 @@ function buildArmSlam(rig: ArmRig): ArmSlam {
   };
 }
 
-export function buildReplayScene(harness: Harness, table: PicnicTable, whale: WhaleModel, boxes: readonly LunchboxModel[], round: RecordedRound): void {
+export function buildReplayScene(harness: Harness, table: PicnicTable, whale: WhaleModel, boxes: readonly LunchboxModel[], source: RoundSource): void {
   const { deck } = table;
-  const { boxCount, tickMs } = round;
-  const director = createRoundDirector(round);
+  const { boxCount, tickMs, timing } = source;
+  let round = source.latestRound();
+  let director = createRoundDirector(round);
   const order = table.table.order + 1.2;
   const printOptions = harness.cardOpts(0, 0, 1, deck);
   const kits = new Map<PigeonVariant, PigeonKit>();
@@ -196,7 +227,7 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
   const perchSpots = Array.from({ length: boxCount }, (_unusedBox, boxIndex) =>
     Array.from({ length: PERCH_SLOT_COUNT }, (_unusedSlot, slot) => perchSpot(boxIndex, boxCount, slot)),
   );
-  const seatActors: SeatActor[] = round.players.map((player, playerIndex) => {
+  const seatActors: SeatActor[] = source.players.map((player, playerIndex) => {
     const variant = PIGEON_VARIANTS[player.variant % PIGEON_VARIANTS.length] ?? "gary";
     const kit = kits.get(variant) ?? printPigeonVariant(harness, deck, variant);
     kits.set(variant, kit);
@@ -207,14 +238,14 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
   const crumbBits = buildCrumbBits(harness, deck, boxCount, order + 2);
   const feathers = buildFeatherPool(printFeather(printOptions), printOptions, deck);
   const flipperShadow = buildFlipperShadow(harness, deck);
-  const startingPot = startingPotOf(round);
-  const revealBoxes = buildRevealBoxes(harness, deck, boxes, round, startingPot, order + 3);
+  const revealBoxes = buildRevealBoxes(harness, deck, boxes, order + 3);
+  const sandwichPrints = createSandwichPrints(harness, deck, boxes.length, order + 3.2);
   const moodGovernor = createMoodGovernor();
   const angryTicksAfterLanding = ANGRY_AFTER_LANDING_MS / tickMs;
-  const settledTick = round.events.findLast((event) => event.kind === "settled")?.tick ?? Number.POSITIVE_INFINITY;
-  const revealStartTick = settledTick + (WHISTLE_S * 1000) / tickMs;
+  const whistleTicks = (WHISTLE_S * 1000) / tickMs;
   const lidStaggerTicks = (REVEAL_LID_STAGGER_S * 1000) / tickMs;
-  const windupMs = round.timing.swatWindupTicks * tickMs;
+  const resultsHoldTicks = (RESULTS_HOLD_S * 1000) / tickMs;
+  const windupMs = timing.swatWindupTicks * tickMs;
   const baseTargetY = harness.target.y;
   const baseFocus = new THREE.Vector3(...SCENE_FOCUS);
   const armsBySide: Record<ArmSide, ArmSlam> = { left: buildArmSlam(whale.leftArm), right: buildArmSlam(whale.rightArm) };
@@ -224,7 +255,9 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
   const cameraScratch = new THREE.Vector3();
   const boxScratch = new THREE.Vector3();
   const focusNow = baseFocus.clone();
-  const stunMs = round.timing.swatStunTicks * tickMs;
+  const stunMs = timing.swatStunTicks * tickMs;
+  let startingPot = startingPotOf(round);
+  let revealStartTick = Number.POSITIVE_INFINITY;
   let revealOrder: RevealBox[] | null = null;
   let lastLanding: SwatLanding | null = null;
   let lastRaise: HandRaisedEvent | null = null;
@@ -415,10 +448,20 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
     for (const seatView of view.seats) actorBySeat.get(seatView.seat)?.showBeakCrumbs(seatView.beakCrumbs);
   }
 
-  harness.onRestart(() => {
+  function chooseRevealProps(): void {
+    const draw = round.events.find((event) => event.kind === "whaleDrawn");
+    const biteStage = biteStageAtSettlement(round, startingPot);
+    for (const reveal of revealBoxes) {
+      reveal.prop = draw && reveal.boxIndex === draw.sandwichBox ? sandwichPrints.propFor(reveal.boxIndex, biteStage) : reveal.moth;
+    }
+  }
+
+  function resetStage(): void {
     director.reset();
     moodGovernor.reset();
     whale.face.reset();
+    startingPot = startingPotOf(round);
+    revealStartTick = Number.POSITIVE_INFINITY;
     revealOrder = null;
     lastLanding = null;
     lastRaise = null;
@@ -446,17 +489,41 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
         bit.flight = null;
       }
     }
+    sandwichPrints.hideAll();
     for (const reveal of revealBoxes) {
       reveal.hasOpened = false;
+      reveal.prop = reveal.moth;
+      reveal.moth.group.visible = false;
       reveal.lidSpring.reset(0);
       reveal.box.setLidOpen(0);
     }
-  });
+  }
+
+  function canLeaveRound(nowTick: number): boolean {
+    if (director.view().phase === "settled") return nowTick >= revealStartTick + (boxCount - 1) * lidStaggerTicks + resultsHoldTicks;
+    return (round.events.at(-1)?.tick ?? Number.NEGATIVE_INFINITY) <= nowTick;
+  }
+
+  function followLatestRound(nowTick: number): void {
+    const latest = source.latestRound();
+    if (latest === round || !canLeaveRound(nowTick)) return;
+    round = latest;
+    director = createRoundDirector(latest);
+    resetStage();
+  }
+
+  harness.onRestart(resetStage);
 
   harness.onStep((timeSeconds, dtSeconds) => {
-    const nowTick = ((timeSeconds - REPLAY_LEAD_S) * 1000) / tickMs;
+    const nowTick = source.tickAt(timeSeconds);
+    followLatestRound(nowTick);
     for (const event of director.advanceTo(Math.floor(nowTick))) {
       if (event.kind === "pecked" && event.outcome !== "emptyBox") actorBySeat.get(event.seat)?.peck(event.tick);
+      if (event.kind === "whaleDrawn") startingPot = startingPotOf(round);
+      if (event.kind === "settled") {
+        revealStartTick = event.tick + whistleTicks;
+        chooseRevealProps();
+      }
       if (event.kind === "handRaised") {
         earlierRaise = lastRaise;
         lastRaise = event;
