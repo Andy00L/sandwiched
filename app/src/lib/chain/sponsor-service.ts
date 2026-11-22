@@ -11,6 +11,7 @@ import { type SponsorGuards, type SponsorLimits, createMemorySponsorGuards, crea
 import { parseSponsorRequest, reviewSponsoredTransaction } from "./sponsor-policy";
 
 export const SPONSOR_KEYPAIR_PATH_ENV = "SANDWICH_SPONSOR_KEYPAIR_PATH";
+export const SPONSOR_SECRET_KEY_ENV = "SANDWICH_SPONSOR_SECRET_KEY";
 export const SPONSOR_MIN_LAMPORTS = 200_000_000;
 export const MAX_SPONSOR_BODY_BYTES = 4_096;
 
@@ -39,13 +40,20 @@ export type SponsorService = {
 
 const refuse = (status: number, reason: string): SponsorReply => ({ status, body: { reason } });
 
-const loadSponsorKeypair = (path: string | undefined): Result<Keypair> => {
-  if (path === undefined || path === "") return failure(`${SPONSOR_KEYPAIR_PATH_ENV} is not set`);
+const parseSponsorKeypair = (text: string, source: string): Result<Keypair> => {
+  const parsed = attemptSync((): unknown => JSON.parse(text));
+  const keypair = parsed.ok ? restoreKeypair(parsed.value) : null;
+  return keypair === null ? failure(`${source} does not hold a keypair`) : success(keypair);
+};
+
+export const loadSponsorKeypair = (env: Record<string, string | undefined>): Result<Keypair> => {
+  const secretKeyText = env[SPONSOR_SECRET_KEY_ENV];
+  if (secretKeyText !== undefined && secretKeyText !== "") return parseSponsorKeypair(secretKeyText, SPONSOR_SECRET_KEY_ENV);
+  const path = env[SPONSOR_KEYPAIR_PATH_ENV];
+  if (path === undefined || path === "") return failure(`neither ${SPONSOR_SECRET_KEY_ENV} nor ${SPONSOR_KEYPAIR_PATH_ENV} is set`);
   const text = attemptSync(() => readFileSync(path, "utf8"));
   if (!text.ok) return failure("the sponsor keypair file cannot be read");
-  const parsed = attemptSync((): unknown => JSON.parse(text.value));
-  const keypair = parsed.ok ? restoreKeypair(parsed.value) : null;
-  return keypair === null ? failure("the sponsor keypair file does not hold a keypair") : success(keypair);
+  return parseSponsorKeypair(text.value, "the sponsor keypair file");
 };
 
 export const readClientIp = (headers: Headers): string =>
@@ -117,7 +125,7 @@ let cachedService: SponsorService | null = null;
 
 export const resolveSponsorService = (): Result<SponsorService> => {
   if (cachedService !== null) return success(cachedService);
-  const keypair = loadSponsorKeypair(process.env[SPONSOR_KEYPAIR_PATH_ENV]);
+  const keypair = loadSponsorKeypair(process.env);
   if (!keypair.ok) return failure(`[resolveSponsorService] ${keypair.reason}`);
   const redis = readRedis();
   if (!redis.ok) console.warn(`[resolveSponsorService] sponsor limits stay in this instance's memory: ${redis.reason}`);

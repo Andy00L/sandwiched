@@ -4,6 +4,7 @@ import { Buffer } from "buffer";
 import { findTableAddress } from "./addresses";
 import { buildSitInstructions, createChainPrograms } from "./program";
 import {
+  loadSponsorKeypair,
   SPONSOR_BALANCE_CACHE_MS,
   SPONSOR_MIN_LAMPORTS,
   SPONSOR_SPEND_RULES,
@@ -128,5 +129,19 @@ describe("readClientIp", () => {
     expect(readClientIp(new Headers({ "x-forwarded-for": "203.0.113.7, 10.0.0.1", "x-real-ip": "198.51.100.2" }))).toBe("198.51.100.2");
     expect(readClientIp(new Headers({ "x-forwarded-for": "203.0.113.7, 10.0.0.1" }))).toBe("10.0.0.1");
     expect(readClientIp(new Headers())).toBe("unknown");
+  });
+});
+
+describe("loadSponsorKeypair", () => {
+  test("reads the key from its JSON bytes in the environment before looking for a file", () => {
+    const sponsor = Keypair.generate();
+    const loaded = loadSponsorKeypair({ SANDWICH_SPONSOR_SECRET_KEY: JSON.stringify(Array.from(sponsor.secretKey)), SANDWICH_SPONSOR_KEYPAIR_PATH: "/missing" });
+    expect(loaded.ok && loaded.value.publicKey.equals(sponsor.publicKey)).toBe(true);
+  });
+
+  test("refuses a malformed key and a missing configuration without echoing the value", () => {
+    const malformed = loadSponsorKeypair({ SANDWICH_SPONSOR_SECRET_KEY: "[1,2,3]" });
+    expect(malformed.ok ? "" : malformed.reason).toBe("SANDWICH_SPONSOR_SECRET_KEY does not hold a keypair");
+    expect(loadSponsorKeypair({}).ok).toBe(false);
   });
 });
