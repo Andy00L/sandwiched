@@ -763,11 +763,12 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
       drawSafe(b);
     }
     addEventListener('resize', resize);
-    H.setQuality = ({ renderScale: scale, shadowMapSize, dofTaps }) => {   // a quality tier chosen after start (the soft shadow samples are compiled in: createHarness light.blockerSamples / filterSamples)
+    H.setQuality = ({ renderScale: scale, shadowMapSize, dofTaps, msaa }) => {   // a quality tier chosen after start (the soft shadow samples are compiled in: createHarness light.blockerSamples / filterSamples)
       if (scale) renderScaleNow = clampScale(scale);
       const shadow = lights.key.shadow;
       if (shadowMapSize && shadow.mapSize.x !== shadowMapSize) { shadow.mapSize.set(shadowMapSize, shadowMapSize); shadow.map?.dispose(); shadow.map = null; }
       if (dofTaps) post.o.taps = dofTaps;
+      if (msaa && post.rtScene.samples !== msaa) { post.o.msaa = msaa; post.rtScene.samples = msaa; post.rtScene.dispose(); }
       resize();
     };
     resize();

@@ -173,7 +173,7 @@ export async function buildTableScene(): Promise<void> {
     view: PARK_VIEW,
     testView: PARK_TEST_VIEW,
     light: { ...PARK_LIGHT, mapSize: quality.shadowMapSize, blockerSamples: quality.blockerSamples, filterSamples: quality.filterSamples },
-    lens: { ...PARK_LENS, taps: quality.dofTaps },
+    lens: { ...PARK_LENS, taps: quality.dofTaps, msaa: quality.msaa },
     focus: SCENE_FOCUS,
     renderScale: quality.renderScale,
   });

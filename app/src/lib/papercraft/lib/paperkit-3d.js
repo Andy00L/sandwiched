@@ -729,7 +729,7 @@ export function fitShadow(lights, center) {
 export const LENS_DEFAULTS = {
   // depth of field. band / ramp = fractions of the height of a 16:9 frame (post.bandScale converts them for another
   // shape); maxBlur = radius in px for a 1080 px short side
-  focusBand: 0.26, ramp: 0.34, maxBlur: 14, nearGain: 1.6, farGain: 1.0, depthWeight: 0.8, taps: 40, highlightBoost: 0.35,
+  focusBand: 0.26, ramp: 0.34, maxBlur: 14, nearGain: 1.6, farGain: 1.0, depthWeight: 0.8, taps: 40, msaa: 4, highlightBoost: 0.35,
   // light falloff across the frame (warmer, brighter toward the key side), as a fraction at the frame edge
   falloff: 0.12, falloffTint: 0.07,
   // silhouette depth line: a thin darker line where a card stands in front of something further away
@@ -920,7 +920,7 @@ export class PaperPost {
     this.focus = new THREE.Vector3();
     renderer.toneMapping = THREE.NoToneMapping;
     const rtOpts = { type: THREE.HalfFloatType, colorSpace: THREE.LinearSRGBColorSpace };
-    this.rtScene = new THREE.WebGLRenderTarget(2, 2, { ...rtOpts, samples: 4 });
+    this.rtScene = new THREE.WebGLRenderTarget(2, 2, { ...rtOpts, samples: this.o.msaa });
     this.rtScene.depthTexture = new THREE.DepthTexture(2, 2);
     this.rtDof = new THREE.WebGLRenderTarget(2, 2, rtOpts);
     const shared = {

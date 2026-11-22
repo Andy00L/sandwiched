@@ -7,15 +7,16 @@ export interface QualitySettings {
   renderScale: number;
   shadowMapSize: number;
   dofTaps: number;
+  msaa: number;
   blockerSamples: number;
   filterSamples: number;
 }
 
 const QUALITY_STORAGE_KEY = "sandwich.qualityTier";
 const QUALITY_BY_TIER: Record<QualityTier, QualitySettings> = {
-  high: { renderScale: 1, shadowMapSize: 4096, dofTaps: 40, blockerSamples: 16, filterSamples: 24 },
-  medium: { renderScale: 0.8, shadowMapSize: 2048, dofTaps: 24, blockerSamples: 8, filterSamples: 16 },
-  low: { renderScale: 0.6, shadowMapSize: 2048, dofTaps: 24, blockerSamples: 8, filterSamples: 16 },
+  high: { renderScale: 1, shadowMapSize: 4096, dofTaps: 40, msaa: 4, blockerSamples: 16, filterSamples: 24 },
+  medium: { renderScale: 0.8, shadowMapSize: 2048, dofTaps: 24, msaa: 2, blockerSamples: 8, filterSamples: 16 },
+  low: { renderScale: 0.6, shadowMapSize: 2048, dofTaps: 24, msaa: 2, blockerSamples: 8, filterSamples: 16 },
 };
 const LOWER_TIER: Record<QualityTier, QualityTier | null> = { high: "medium", medium: "low", low: null };
 const PROBE_DELAY_MS = 2500;

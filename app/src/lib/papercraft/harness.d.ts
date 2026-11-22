@@ -44,6 +44,7 @@ export interface LensOptions {
   chroma?: number;
   sharpen?: number;
   taps?: number;
+  msaa?: number;
 }
 
 export interface LightOptions {
@@ -147,7 +148,7 @@ export interface Harness {
   onRestart(hook: () => void): void;
   setHero(handle: PlacedPiece, options?: { turn?: "yaw" | "flip" }): void;
   start(): void;
-  setQuality(quality: { renderScale?: number; shadowMapSize?: number; dofTaps?: number }): void;
+  setQuality(quality: { renderScale?: number; shadowMapSize?: number; dofTaps?: number; msaa?: number }): void;
   focusOn(point: THREE.Vector3 | null): void;
   castShadowOnly(object: THREE.Object3D): void;
   keyLight: THREE.DirectionalLight | null;
