@@ -28,7 +28,7 @@ const BANNED_IN_LIB = [
 export default defineConfig([
   ...nextVitals,
   ...nextTs,
-  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
+  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts", "src/lib/papercraft/**/*.js"]),
   {
     rules: {
       "@typescript-eslint/no-explicit-any": "error",
