@@ -36,6 +36,19 @@ const SCALE_ONLY_IN_VERBS = [
   },
 ];
 
+const PER_FRAME_FUNCTION = ":matches(FunctionDeclaration, FunctionExpression)[id.name!=/^(build|create|print|make)[A-Z]/]";
+const STEP_CALLBACK = "CallExpression[callee.property.name='onStep']";
+const PER_FRAME_ALLOCATION_MESSAGE =
+  "Replay and motion code runs every frame: allocate in a build*/create*/print*/make* function and reuse it (a module scratch vector, an `out` parameter, a precomputed table).";
+const NO_ALLOCATION_PER_FRAME = [
+  { selector: `${PER_FRAME_FUNCTION} NewExpression[callee.object.name='THREE']`, message: PER_FRAME_ALLOCATION_MESSAGE },
+  { selector: `${PER_FRAME_FUNCTION} NewExpression[callee.name=/^(Map|Set)$/]`, message: PER_FRAME_ALLOCATION_MESSAGE },
+  { selector: `${PER_FRAME_FUNCTION} CallExpression[callee.property.name='clone']`, message: PER_FRAME_ALLOCATION_MESSAGE },
+  { selector: `${STEP_CALLBACK} NewExpression[callee.object.name='THREE']`, message: PER_FRAME_ALLOCATION_MESSAGE },
+  { selector: `${STEP_CALLBACK} NewExpression[callee.name=/^(Map|Set)$/]`, message: PER_FRAME_ALLOCATION_MESSAGE },
+  { selector: `${STEP_CALLBACK} CallExpression[callee.property.name='clone']`, message: PER_FRAME_ALLOCATION_MESSAGE },
+];
+
 export default defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -71,6 +84,13 @@ export default defineConfig([
     ignores: ["src/lib/table/motion/verbs.ts"],
     rules: {
       "no-restricted-syntax": ["error", ...BANNED_IN_LIB, ...SCALE_ONLY_IN_VERBS],
+    },
+  },
+  {
+    files: ["src/lib/table/replay/**/*.ts", "src/lib/table/motion/**/*.ts"],
+    ignores: ["**/*.test.ts", "src/lib/table/motion/verbs.ts"],
+    rules: {
+      "no-restricted-syntax": ["error", ...BANNED_IN_LIB, ...SCALE_ONLY_IN_VERBS, ...NO_ALLOCATION_PER_FRAME],
     },
   },
 ]);

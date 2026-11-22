@@ -38,7 +38,7 @@ import { BOX_ROW_DECK_Z, boxAlong, hoverSpot, perchSpot } from "./perches";
 import type { PerchSpot } from "./perches";
 import { createRoundDirector, PERCH_SLOT_COUNT } from "./round-director";
 import type { FlightEnd, SeatPose } from "./round-director";
-import { HAND_COCK_RAD, handCockAmount, raisedHandPosition, slamHandPosition } from "./slam";
+import { HAND_COCK_RAD, handCockAmount, makeRaisedHandPosition, slamHandPosition } from "./slam";
 import type { HandPath } from "./slam";
 import { createMoodGovernor, crowdedGlance, glanceTowardBox } from "./whale-mood";
 
@@ -177,7 +177,7 @@ function heightOf(end: FlightEnd): number {
 function buildArmSlam(rig: ArmRig): ArmSlam {
   return {
     rig,
-    path: { rest: restHandPosition(rig.side), raised: raisedHandPosition(rig.shoulder, rig.side), contact: new THREE.Vector3() },
+    path: { rest: restHandPosition(rig.side), raised: makeRaisedHandPosition(rig.shoulder, rig.side), contact: new THREE.Vector3() },
     hand: new THREE.Vector3(),
     raise: null,
   };
@@ -221,6 +221,8 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
   const arms: readonly ArmSlam[] = [armsBySide.left, armsBySide.right];
   const contactInDeck = new THREE.Vector3();
   const focusTarget = new THREE.Vector3();
+  const cameraScratch = new THREE.Vector3();
+  const boxScratch = new THREE.Vector3();
   const focusNow = baseFocus.clone();
   const stunMs = round.timing.swatStunTicks * tickMs;
   let revealOrder: RevealBox[] | null = null;
@@ -273,9 +275,9 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
   }
 
   function sortNearestFirst(reveals: readonly RevealBox[]): RevealBox[] {
-    const cameraPosition = harness.camera.getWorldPosition(new THREE.Vector3());
+    const cameraPosition = harness.camera.getWorldPosition(cameraScratch);
     return reveals
-      .map((reveal) => ({ reveal, distance: reveal.box.node.getWorldPosition(new THREE.Vector3()).distanceTo(cameraPosition) }))
+      .map((reveal) => ({ reveal, distance: reveal.box.node.getWorldPosition(boxScratch).distanceTo(cameraPosition) }))
       .sort((first, second) => first.distance - second.distance)
       .map(({ reveal }) => reveal);
   }

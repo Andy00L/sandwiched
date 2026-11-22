@@ -22,7 +22,7 @@ const RAISED_HAND_UP_UNITS = 8.5;
 const RAISED_HAND_BACK_UNITS = 3;
 export const HAND_COCK_RAD = 0.6;
 
-export function raisedHandPosition(shoulder: THREE.Vector3, side: -1 | 1): THREE.Vector3 {
+export function makeRaisedHandPosition(shoulder: THREE.Vector3, side: -1 | 1): THREE.Vector3 {
   return new THREE.Vector3(shoulder.x + side * RAISED_HAND_OUT_UNITS, shoulder.y + RAISED_HAND_UP_UNITS, shoulder.z - RAISED_HAND_BACK_UNITS);
 }
 
