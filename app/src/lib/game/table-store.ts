@@ -19,6 +19,7 @@ import { applyRoundEvent, createViewState, type RoundViewState } from "./view-st
 
 const DEFAULT_HORIZON_TICKS = 10;
 const PREDICTION_TIMEOUT_TICKS = 150;
+const SETTLE_WAIT_MS = 500;
 const PIGEON_NAMES = ["Gary", "Linda", "Doug", "Brenda", "Keith", "Sheila"] as const;
 const LIVE_PLAYER_TEMPERAMENT: Temperament = "greedy";
 
@@ -34,6 +35,7 @@ export type LiveRound = { roundNumber: number; round: RecordedRound; view: Round
 
 export type TableStoreSnapshot = {
   live: LiveRound | null;
+  previous: LiveRound | null;
   ownSeat: number | null;
   predicted: readonly PredictedEvent[];
   lastRefusal: ActionRefusal | null;
@@ -57,7 +59,7 @@ export type TableStoreOptions = {
   timing?: RoundTiming;
 };
 
-type PendingChange = { slot: number; arrival: number } & (
+type PendingChange = { slot: number; arrival: number; arrivedAtMs: number } & (
   | { kind: "table"; snapshot: TableSnapshot }
   | { kind: "seat"; snapshot: SeatSnapshot }
 );
@@ -124,8 +126,16 @@ function buildSettledFrame(applied: ChainFrame, next: ChainFrame, roundNumber: n
   const previousTable = applied.table;
   const table = next.table;
   if (previousTable === null || table === null || previousTable.phase.state !== "live") return null;
-  if (table.lastResult === null || Number(table.lastResult.roundNumber) !== roundNumber) return null;
+  if (!isSettleOf(table, roundNumber)) return null;
   if (!hasRoundActivity(table)) return { tick: next.tick, table, seats: next.seats };
+  const nextRoundAntes = new Set(table.antedSeatIndexes);
+  const readSeatAtSettle = (seatIndex: number, seat: SeatSnapshot): SeatSnapshot => {
+    if (!nextRoundAntes.has(seatIndex)) return seat;
+    const roundSeat = applied.seats.get(seatIndex);
+    if (roundSeat === undefined || !roundSeat.wallet.equals(seat.wallet)) return seat;
+    return { ...roundSeat, slot: seat.slot, chips: seat.chips + BigInt(CHIPS_PER_ANTE) };
+  };
+  const seatsAtSettle = new Map([...next.seats].map(([seatIndex, seat]) => [seatIndex, readSeatAtSettle(seatIndex, seat)]));
   const settleTick = Math.min(Math.max(Number(previousTable.round.endTick), previousTable.slot, applied.tick), next.tick);
   const settledTable: TableSnapshot = {
     ...previousTable,
@@ -136,7 +146,11 @@ function buildSettledFrame(applied: ChainFrame, next: ChainFrame, roundNumber: n
     lastResult: table.lastResult,
     round: table.phase.state === "live" ? previousTable.round : table.round,
   };
-  return { tick: Math.max(applied.tick, settleTick), table: settledTable, seats: applied.seats };
+  return { tick: Math.max(applied.tick, settleTick), table: settledTable, seats: seatsAtSettle };
+}
+
+function isSettleOf(table: TableSnapshot, roundNumber: number): boolean {
+  return table.lastResult !== null && Number(table.lastResult.roundNumber) === roundNumber;
 }
 
 function answersPrediction(prediction: Prediction, event: RoundEvent): boolean {
@@ -185,8 +199,9 @@ export function createTableStore(options: TableStoreOptions): TableStore {
   let roundState: RoundState | null = null;
   let predictions: Prediction[] = [];
   let lastRefusal: ActionRefusal | null = null;
+  let previousRound: LiveRound | null = null;
   let publishedLive: { from: RoundState; eventCount: number; live: LiveRound } | null = null;
-  let snapshot: TableStoreSnapshot = { live: null, ownSeat: null, predicted: [], lastRefusal: null };
+  let snapshot: TableStoreSnapshot = { live: null, previous: null, ownSeat: null, predicted: [], lastRefusal: null };
 
   const findOwnSeat = (): number | null => {
     if (ownWallet === null || applied.table === null) return null;
@@ -194,17 +209,17 @@ export function createTableStore(options: TableStoreOptions): TableStore {
     return seat === -1 ? null : seat;
   };
 
-  const readLiveRound = (): LiveRound | null => {
-    if (roundState === null) return null;
-    if (publishedLive !== null && publishedLive.from === roundState && publishedLive.eventCount === roundState.events.length) return publishedLive.live;
-    const live: LiveRound = { roundNumber: roundState.roundNumber, round: { ...roundState.header, events: [...roundState.events] }, view: roundState.view };
-    publishedLive = { from: roundState, eventCount: roundState.events.length, live };
+  const toLiveRound = (round: RoundState): LiveRound => {
+    if (publishedLive !== null && publishedLive.from === round && publishedLive.eventCount === round.events.length) return publishedLive.live;
+    const live: LiveRound = { roundNumber: round.roundNumber, round: { ...round.header, events: [...round.events] }, view: round.view };
+    publishedLive = { from: round, eventCount: round.events.length, live };
     return live;
   };
 
   const publish = () => {
     snapshot = {
-      live: readLiveRound(),
+      live: roundState === null ? null : toLiveRound(roundState),
+      previous: previousRound,
       ownSeat: findOwnSeat(),
       predicted: predictions.map((prediction) => prediction.event),
       lastRefusal,
@@ -259,6 +274,7 @@ export function createTableStore(options: TableStoreOptions): TableStore {
       return hasSettled;
     }
     const nextRound = startRound(table, timing);
+    previousRound = toLiveRound(roundState);
     roundState = nextRound;
     recordStep(nextRound, buildRoundStartFrame(applied, table), next);
     return true;
@@ -271,6 +287,22 @@ export function createTableStore(options: TableStoreOptions): TableStore {
       return false;
     }
     return stepTo({ ...applied, tick: horizon });
+  };
+
+  const findSettleHoldTick = (): number | null => {
+    const round = roundState;
+    const endTick = round?.view.endTick ?? null;
+    if (round === null || round.view.phase !== "live" || endTick === null) return null;
+    const afterEnd = pendingChanges.filter((change) => change.slot >= endTick);
+    if (afterEnd.length === 0) return null;
+    if (now() - Math.min(...afterEnd.map((change) => change.arrivedAtMs)) >= SETTLE_WAIT_MS) return null;
+    const settle = afterEnd.find((change) => change.kind === "table" && isSettleOf(change.snapshot, round.roundNumber));
+    if (settle === undefined) return endTick;
+    const hasSeatAtSettle = (seatIndex: number) =>
+      (applied.seats.get(seatIndex)?.slot ?? -1) >= settle.slot ||
+      afterEnd.some((change) => change.kind === "seat" && change.snapshot.seatIndex === seatIndex && change.slot >= settle.slot);
+    const pigeonSeats = round.view.seats.filter((seat) => seat.role === "pigeon" && seat.presence === "anted");
+    return pigeonSeats.every((seat) => hasSeatAtSettle(seat.seat)) ? null : endTick;
   };
 
   const applyDueChanges = (horizon: number): boolean => {
@@ -294,8 +326,10 @@ export function createTableStore(options: TableStoreOptions): TableStore {
   const advance = () => {
     const chainTick = clock.estimate(now());
     const horizon = Math.max(applied.tick, chainTick - horizonTicks);
-    let hasChanged = applyDueChanges(horizon);
-    if (horizon > applied.tick) hasChanged = advanceClockTo(horizon) || hasChanged;
+    const settleHoldTick = findSettleHoldTick();
+    const releaseTick = settleHoldTick === null ? horizon : Math.min(horizon, settleHoldTick - 1);
+    let hasChanged = applyDueChanges(releaseTick);
+    if (releaseTick > applied.tick) hasChanged = advanceClockTo(releaseTick) || hasChanged;
     const liveRoundNumber = roundState?.view.phase === "live" ? roundState.roundNumber : null;
     hasChanged = keepPredictions((prediction) => prediction.roundNumber === liveRoundNumber && prediction.expiresTick >= chainTick) || hasChanged;
     if (hasChanged) publish();
@@ -307,6 +341,7 @@ export function createTableStore(options: TableStoreOptions): TableStore {
     pendingChanges = [];
     applied = EMPTY_CHAIN_FRAME;
     roundState = null;
+    previousRound = null;
     predictions = [];
     clock.reset();
   };
@@ -355,11 +390,11 @@ export function createTableStore(options: TableStoreOptions): TableStore {
     getSnapshot: () => snapshot,
     ingestTable: (table) => {
       arrivalCount += 1;
-      ingest(table.address.toBase58(), { kind: "table", snapshot: table, slot: table.slot, arrival: arrivalCount });
+      ingest(table.address.toBase58(), { kind: "table", snapshot: table, slot: table.slot, arrival: arrivalCount, arrivedAtMs: now() });
     },
     ingestSeat: (seat) => {
       arrivalCount += 1;
-      ingest(seat.address.toBase58(), { kind: "seat", snapshot: seat, slot: seat.slot, arrival: arrivalCount });
+      ingest(seat.address.toBase58(), { kind: "seat", snapshot: seat, slot: seat.slot, arrival: arrivalCount, arrivedAtMs: now() });
     },
     advance,
     horizonTick: () => applied.tick,

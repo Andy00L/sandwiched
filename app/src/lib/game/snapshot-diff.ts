@@ -43,12 +43,12 @@ function countKnownSwats(previousTable: TableSnapshot | null, table: TableSnapsh
     const isLatestSwatInTheAir = latestSwat !== undefined && Number(latestSwat.landsTick) > table.slot;
     return Number(table.round.swatCount) - (isLatestSwatInTheAir ? 1 : 0);
   }
-  const isSameLiveRound = previousTable.roundNumber === table.roundNumber && previousTable.phase.state === "live";
+  const isSameLiveRound = previousTable.phase.state === "live" && (previousTable.roundNumber === table.roundNumber || isSettlement(previousTable, table));
   return isSameLiveRound ? Number(previousTable.round.swatCount) : 0;
 }
 
 function listRaiseActions(previousTable: TableSnapshot | null, table: TableSnapshot, timing: RoundTiming, bounds: TickBounds): ChainAction[] {
-  if (table.phase.state !== "live") return [];
+  if (table.phase.state !== "live" && !isSettlement(previousTable, table)) return [];
   const knownSwatCount = countKnownSwats(previousTable, table);
   return table.round.swats
     .filter((swat) => Number(swat.number) > knownSwatCount)
