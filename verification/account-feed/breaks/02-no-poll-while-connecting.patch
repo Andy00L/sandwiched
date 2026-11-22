@@ -1,0 +1,11 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -197,7 +197,7 @@
+   };
+ 
+   const syncPolling = () => {
+-    const shouldPoll = link.status === "connecting" || link.status === "polling";
++    const shouldPoll = link.status === "polling";
+     if (shouldPoll && pollTimer === null) {
+       pollTimer = setInterval(() => requestRead(watchers.keys()), pollIntervalMs);
+       requestRead(watchers.keys());

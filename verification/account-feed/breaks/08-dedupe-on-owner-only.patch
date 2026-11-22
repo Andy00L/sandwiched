@@ -1,0 +1,11 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -156,7 +156,7 @@
+     watcher.lastSlot = slot;
+     const ownerText = raw.value?.ownerText ?? null;
+     const dataBase64 = raw.value?.dataBase64 ?? null;
+-    if (watcher.lastChange !== null && ownerText === watcher.lastOwnerText && dataBase64 === watcher.lastDataBase64) return;
++    if (watcher.lastChange !== null && ownerText === watcher.lastOwnerText) return;
+     const account = raw.value === null ? success(null) : decodeRawAccount(raw.value);
+     if (!account.ok) {
+       console.warn(`[createAccountFeed] ${watcher.key}: ${account.reason}`);

@@ -1,0 +1,11 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -179,7 +179,7 @@
+   };
+ 
+   const drainReads = async (): Promise<void> => {
+-    if (isReading || pendingReadKeys.size === 0 || readStatus() === "closed") return;
++    if (pendingReadKeys.size === 0 || readStatus() === "closed") return;
+     isReading = true;
+     const keys = [...pendingReadKeys];
+     pendingReadKeys.clear();

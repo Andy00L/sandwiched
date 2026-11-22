@@ -1,0 +1,10 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -221,7 +221,6 @@
+   const moveTo = (next: FeedLink) => {
+     const previous = link;
+     if (previous.status === "live") clearInterval(previous.heartbeat);
+-    if (previous.status === "polling") clearTimeout(previous.reconnect);
+     const isSocketCarried = "socket" in previous && "socket" in next && previous.socket === next.socket;
+     if ("socket" in previous && !isSocketCarried) {
+       const leftSocket = previous.socket;

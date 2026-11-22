@@ -1,0 +1,10 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -209,7 +209,6 @@
+     const isReadStillNeeded = pendingReadKeys.size > 0;
+     if (link.status === "live" && isReadStillNeeded && consecutiveReadFailures >= READ_FAILURES_BEFORE_DEGRADED) {
+       console.warn("[createAccountFeed] reads keep failing, falling back to polling");
+-      handleDrop();
+     }
+     if (readRetry !== null) return;
+     readRetry = setTimeout(() => {

@@ -1,0 +1,19 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -179,7 +179,7 @@
+   };
+ 
+   const drainReads = async (): Promise<void> => {
+-    if (isReading || pendingReadKeys.size === 0 || readStatus() === "closed") return;
++    if (isReading || pendingReadKeys.size === 0) return;
+     isReading = true;
+     const keys = [...pendingReadKeys];
+     pendingReadKeys.clear();
+@@ -351,7 +351,6 @@
+   };
+ 
+   const watch = (address: PublicKey, onChange: ChangeListener) => {
+-    if (link.status === "closed") return () => undefined;
+     const key = address.toBase58();
+     const existing = watchers.get(key);
+     const watcher: Watcher = existing ?? {

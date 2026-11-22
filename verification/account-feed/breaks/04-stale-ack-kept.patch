@@ -1,0 +1,13 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -262,10 +262,6 @@
+       requestRead([watcher.key]);
+       return;
+     }
+-    if (!isCurrent) {
+-      sendRequest("accountUnsubscribe", [result]);
+-      return;
+-    }
+     watcher.subscriptionId = result;
+     watcher.subscribeAttempts = 0;
+     subscriptionOwners.set(result, watcher);

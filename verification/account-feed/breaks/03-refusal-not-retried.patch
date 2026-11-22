@@ -1,0 +1,10 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -258,7 +258,6 @@
+     if (typeof result !== "number") {
+       if (!isCurrent) return;
+       console.warn(`[createAccountFeed] accountSubscribe refused for ${watcher.key}, retrying`);
+-      scheduleSubscribeRetry(watcher);
+       requestRead([watcher.key]);
+       return;
+     }

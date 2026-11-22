@@ -1,0 +1,10 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -204,7 +204,6 @@
+   };
+ 
+   const retryFailedRead = (keys: readonly string[]) => {
+-    for (const key of keys) if (watchers.has(key)) pendingReadKeys.add(key);
+     consecutiveReadFailures += 1;
+     const isReadStillNeeded = pendingReadKeys.size > 0;
+     if (link.status === "live" && isReadStillNeeded && consecutiveReadFailures >= READ_FAILURES_BEFORE_DEGRADED) {

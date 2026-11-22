@@ -1,0 +1,10 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -269,7 +269,6 @@
+     watcher.subscriptionId = result;
+     watcher.subscribeAttempts = 0;
+     subscriptionOwners.set(result, watcher);
+-    requestRead([watcher.key]);
+   };
+ 
+   const handleNotification = (params: unknown) => {

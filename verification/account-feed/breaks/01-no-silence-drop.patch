@@ -1,0 +1,14 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -289,11 +289,6 @@
+ 
+   const checkHeartbeat = () => {
+     if (link.status !== "live") return;
+-    if (performance.now() - link.lastInboundAtMs > HEARTBEAT_MS * SILENT_HEARTBEATS_BEFORE_DROP) {
+-      console.warn("[createAccountFeed] the socket went silent, falling back to polling");
+-      handleDrop();
+-      return;
+-    }
+     if (sendRequest("ping") === null) handleDrop();
+   };
+ 

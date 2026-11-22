@@ -1,0 +1,10 @@
+--- a/app/src/lib/chain/account-feed.ts
++++ b/app/src/lib/chain/account-feed.ts
+@@ -272,7 +272,6 @@
+     if (requestId === null) return;
+     pendingSubscriptions.set(requestId, watcher);
+     if (watcher.subscribeDeadline !== null) clearTimeout(watcher.subscribeDeadline);
+-    watcher.subscribeDeadline = setTimeout(() => expireSubscription(requestId, watcher), SUBSCRIBE_ANSWER_TIMEOUT_MS);
+   };
+ 
+   const expireSubscription = (requestId: number, watcher: Watcher) => {
