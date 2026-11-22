@@ -1,0 +1,11 @@
+--- a/app/src/lib/chain/deposits.ts
++++ b/app/src/lib/chain/deposits.ts
+@@ -254,7 +254,7 @@
+     if (!base.ok) return keepWaiting(record, base.reason);
+     switch (base.value.kind) {
+       case "missing":
+-        return readNowMs() - record.createdAtMs < UNSEEN_ON_BASE_GRACE_MS
++        return readNowMs() - record.createdAtMs < 0
+           ? keepWaiting(record, "the deposit is not on base yet")
+           : settleAs(record, "closed", "no shuttle on base two minutes after the deposit was recorded");
+       case "delegated":

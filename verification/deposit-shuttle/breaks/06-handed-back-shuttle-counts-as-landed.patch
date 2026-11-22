@@ -1,0 +1,11 @@
+--- a/app/src/lib/chain/deposits.ts
++++ b/app/src/lib/chain/deposits.ts
+@@ -200,7 +200,7 @@
+         const base = await chain.readBaseShuttle(shuttleId);
+         if (!base.ok) return null;
+         if (base.value.kind === "delegated") hasSeenInFlight = true;
+-        return base.value.kind === "missing" && hasSeenInFlight ? true : null;
++        return base.value.kind !== "delegated" && hasSeenInFlight ? true : null;
+       },
+       DEPOSIT_LANDING_TIMEOUT_MS,
+       SHUTTLE_POLL_MS,

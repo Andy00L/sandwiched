@@ -1,0 +1,15 @@
+--- a/app/src/lib/chain/deposits.ts
++++ b/app/src/lib/chain/deposits.ts
+@@ -208,9 +208,10 @@
+     const before = await chain.readOwnerUnits();
+     if (!before.ok) return failure(`[runDeposit] rollup balance: ${before.reason}`);
+     const createdAtMs = readNowMs();
+-    const intent = ledger.recordIntent(drawShuttleId(), units, createdAtMs);
++    const shuttleId = drawShuttleId();
++    const submitted = await chain.submitDeposit(units, shuttleId);
++    const intent = ledger.recordIntent(shuttleId, units, createdAtMs);
+     if (!intent.ok) return failure(`[runDeposit] nothing was sent, the deposit cannot be recorded first: ${intent.reason}`);
+-    const submitted = await chain.submitDeposit(units, intent.value.shuttleId);
+     if (!submitted.ok) return failure(`[runDeposit] ${submitted.reason}`);
+     const signature = submitted.value.signature;
+     const sent = ledger.markSent(intent.value, signature);

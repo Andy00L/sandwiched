@@ -1,0 +1,11 @@
+--- a/app/src/lib/chain/deposits.ts
++++ b/app/src/lib/chain/deposits.ts
+@@ -186,7 +186,7 @@
+   };
+ 
+   const waitForLanding = (shuttleId: number) => {
+-    let hasSeenInFlight = false;
++    let hasSeenInFlight = true;
+     return pollUntil(
+       "deposit on the rollup",
+       async () => {

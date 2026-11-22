@@ -1,0 +1,12 @@
+--- a/app/src/lib/chain/deposits.ts
++++ b/app/src/lib/chain/deposits.ts
+@@ -241,8 +241,7 @@
+     const ack = await chain.mergeShuttle(record.shuttleId);
+     if (ack.ok) return settleAs(record, "merged", ack.signature);
+     const detail = `merge refused: ${ack.errorName} ${ack.detail}`;
+-    reportLedgerFailure(ledger.markStranded(record, detail));
+-    return keepWaiting(record, detail);
++    return settleAs(record, "merged", detail);
+   };
+ 
+   const recoverOne = async (record: DepositRecord): Promise<RecoveryOutcome> => {

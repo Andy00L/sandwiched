@@ -1,0 +1,11 @@
+--- a/app/src/lib/chain/deposits.ts
++++ b/app/src/lib/chain/deposits.ts
+@@ -217,7 +217,7 @@
+     reportLedgerFailure(sent);
+     const current: DepositRecord = sent.ok ? sent.value : intent.value;
+     const confirmed = await chain.confirmDeposit(submitted.value);
+-    if (!confirmed.ok && confirmed.hasLanded) {
++    if (!confirmed.ok) {
+       reportLedgerFailure(ledger.settle(current));
+       return failure(`[runDeposit] the deposit failed on base and moved nothing: ${confirmed.reason}`);
+     }
