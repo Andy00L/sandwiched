@@ -61,6 +61,7 @@ import { listenForTableClicks } from "./stage/box-picking";
 import { type SignpostLook, buildSignpost } from "./pieces/signpost";
 import { buildTitleBanner } from "./pieces/title-banner";
 import { type CameraShot, directCameraShots } from "./stage/camera-shots";
+import { registerSceneCapture } from "./stage/scene-capture";
 import { recordFrameTimes } from "./stage/frame-recorder";
 import { buildParkLife } from "./stage/park-life";
 import { printParkGround } from "./stage/park-ground";
@@ -257,6 +258,7 @@ function buildScene(mode: SceneMode, signposts: readonly SignpostPlacement[], re
   trimHiddenBacksOnceRisen(harness);
   harness.start();
   if (readShot !== null) directCameraShots(harness, readShot);
+  registerSceneCapture(harness.captureFrame);
   probeQualityTier(harness);
   holdAtRequestedTime();
   reportFrameTimesWhenAsked(harness);

@@ -2,6 +2,7 @@ import { loadGuestKey } from "../chain/guest-key";
 import { createBrowserKeyStore } from "../chain/key-store";
 import type { Result } from "../chain/result";
 import { ROLE_SHEET_S, revealSheetDelayS } from "../table/motion/motion-tokens";
+import { captureSceneFrame } from "../table/stage/scene-capture";
 import { readPigeonBox } from "./chain-rules";
 import type { ClickTarget } from "./click-intent";
 import type { GuestStage } from "./guest-steps";
@@ -23,6 +24,8 @@ export type PlayController = {
   playNow: (buyInChips: bigint) => void;
   anteAgain: () => void;
   cashOut: () => void;
+  openShare: () => void;
+  closeShare: () => void;
   toggleDrawer: (drawer: Drawer) => void;
   closeDrawer: () => void;
   clickTable: (target: ClickTarget) => void;
@@ -72,10 +75,10 @@ export function createPlayController(ports: PlayControllerPorts): PlayController
           showRole(round.roundNumber, seat.role);
         }
         if (round.view.phase !== "settled" || !playedRounds.has(round.roundNumber) || settledRounds.has(round.roundNumber)) continue;
-        const summary = summarizeRound(round.roundNumber, round.round, ownSeat);
+        const summary = summarizeRound(round.roundNumber, round.round, ownSeat, opened.tableSnapshot.address.toBase58());
         if (summary === null) continue;
         settledRounds.add(round.roundNumber);
-        setTimeout(() => dispatch({ kind: "roundSettled", summary }), revealSheetDelayS(boxCount) * 1000);
+        setTimeout(() => dispatch({ kind: "roundSettled", summary, frame: captureSceneFrame() }), revealSheetDelayS(boxCount) * 1000);
       }
     });
   };
@@ -156,6 +159,8 @@ export function createPlayController(ports: PlayControllerPorts): PlayController
     playNow: (buyInChips) => void playNow(buyInChips),
     anteAgain,
     cashOut: () => void cashOut(),
+    openShare: () => dispatch({ kind: "openShare" }),
+    closeShare: () => dispatch({ kind: "closeShare" }),
     toggleDrawer: (drawer) => dispatch({ kind: "toggleDrawer", drawer }),
     closeDrawer: () => dispatch({ kind: "closeDrawer" }),
     clickTable,

@@ -9,7 +9,7 @@ const TABLE: TableListing = { tableId: 2_001n, kind: "practice", anteUnits: 100_
 
 const play = (...events: PlayEvent[]): PlayState => events.reduce(stepPlay, INITIAL_PLAY_STATE);
 
-const SUMMARY = { roundNumber: 4, whaleCrumbs: 500, pigeonCrumbs: 200, ownSeat: 1, ownRole: "pigeon" as const, ownCrumbs: 41, topPigeons: [] };
+const SUMMARY = { roundNumber: 4, tableAddress: "table", whaleCrumbs: 500, pigeonCrumbs: 200, ownSeat: 1, ownRole: "pigeon" as const, ownCrumbs: 41, topPigeons: [] };
 
 describe("stepPlay", () => {
   test("a visitor picks a table, plays now, and sits once the guest is ready", () => {
@@ -35,10 +35,13 @@ describe("stepPlay", () => {
     expect(isTableOpenForPlay(withRole)).toBe(false);
     const afterRole = stepPlay(withRole, { kind: "roleSeen", roundNumber: 4 });
     expect(stepPlay(afterRole, { kind: "roundLive", roundNumber: 4, role: "whale" }).flow).toMatchObject({ overlay: { kind: "none" } });
-    const results = stepPlay(afterRole, { kind: "roundSettled", summary: SUMMARY });
+    const results = stepPlay(afterRole, { kind: "roundSettled", summary: SUMMARY, frame: null });
     expect(results.flow).toMatchObject({ overlay: { kind: "results" } });
+    const sharing = stepPlay(results, { kind: "openShare" });
+    expect(sharing.flow).toMatchObject({ overlay: { kind: "share" } });
+    expect(stepPlay(sharing, { kind: "closeShare" }).flow).toMatchObject({ overlay: { kind: "results" } });
     const anted = stepPlay(results, { kind: "anteAgain" });
-    expect(stepPlay(anted, { kind: "roundSettled", summary: SUMMARY }).flow).toMatchObject({ overlay: { kind: "none" } });
+    expect(stepPlay(anted, { kind: "roundSettled", summary: SUMMARY, frame: null }).flow).toMatchObject({ overlay: { kind: "none" } });
   });
 
   test("cashing out goes from the results to a receipt, and a receipt that left money on the rollup can try again", () => {
@@ -46,7 +49,7 @@ describe("stepPlay", () => {
       { kind: "pickTable", table: TABLE },
       { kind: "playNow" },
       { kind: "seatStage", stage: { kind: "ready" } },
-      { kind: "roundSettled", summary: SUMMARY },
+      { kind: "roundSettled", summary: SUMMARY, frame: null },
     );
     const cashing = stepPlay(results, { kind: "cashOutStarted" });
     expect(cashing.flow).toMatchObject({ overlay: { kind: "cashingOut" } });
@@ -82,12 +85,12 @@ describe("summarizeRound", () => {
   ]);
 
   test("gives a pigeon its own beak and ranks the flock by crumbs", () => {
-    expect(summarizeRound(9, round, 2)).toMatchObject({ ownRole: "pigeon", ownCrumbs: 41, topPigeons: [{ name: "Doug", crumbs: 41 }, { name: "Linda", crumbs: 12 }, { name: "Brenda", crumbs: 7 }] });
+    expect(summarizeRound(9, round, 2, "table")).toMatchObject({ ownRole: "pigeon", ownCrumbs: 41, topPigeons: [{ name: "Doug", crumbs: 41 }, { name: "Linda", crumbs: 12 }, { name: "Brenda", crumbs: 7 }] });
   });
 
   test("gives the whale what it kept, and nothing to a seat that sat the round out", () => {
-    expect(summarizeRound(9, round, 0)).toMatchObject({ ownRole: "whale", ownCrumbs: 340 });
-    expect(summarizeRound(9, round, 5)).toBeNull();
+    expect(summarizeRound(9, round, 0, "table")).toMatchObject({ ownRole: "whale", ownCrumbs: 340 });
+    expect(summarizeRound(9, round, 5, "table")).toBeNull();
   });
 });
 

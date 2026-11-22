@@ -161,6 +161,7 @@ export interface Harness {
   start(): void;
   setQuality(quality: { renderScale?: number; shadowMapSize?: number; dofTaps?: number; msaa?: number }): void;
   focusOn(point: THREE.Vector3 | null): void;
+  captureFrame(): HTMLCanvasElement | null;
   castShadowOnly(object: THREE.Object3D): void;
   keyLight: THREE.DirectionalLight | null;
   readonly frameCost: { readonly stepMs: number; readonly renderMs: number };

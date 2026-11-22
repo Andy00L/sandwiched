@@ -9,6 +9,7 @@ export type PigeonTally = { seat: number; name: string; crumbs: number };
 
 export type RoundSummary = {
   roundNumber: number;
+  tableAddress: string;
   whaleCrumbs: number;
   pigeonCrumbs: number;
   ownSeat: number;
@@ -22,7 +23,8 @@ export type SeatSheet = { phase: "choosing" } | { phase: "seating"; step: GuestS
 export type TableOverlay =
   | { kind: "none" }
   | { kind: "role"; role: Role; roundNumber: number }
-  | { kind: "results"; summary: RoundSummary }
+  | { kind: "results"; summary: RoundSummary; frame: HTMLCanvasElement | null }
+  | { kind: "share"; summary: RoundSummary; frame: HTMLCanvasElement | null }
   | { kind: "cashingOut" }
   | { kind: "receipt"; receipt: CashOutReceipt };
 
@@ -50,7 +52,9 @@ export type PlayEvent =
   | { kind: "seatStage"; stage: GuestStage }
   | { kind: "roundLive"; roundNumber: number; role: Role }
   | { kind: "roleSeen"; roundNumber: number }
-  | { kind: "roundSettled"; summary: RoundSummary }
+  | { kind: "roundSettled"; summary: RoundSummary; frame: HTMLCanvasElement | null }
+  | { kind: "openShare" }
+  | { kind: "closeShare" }
   | { kind: "anteAgain" }
   | { kind: "cashOutStarted" }
   | { kind: "cashOutEnded"; receipt: CashOutReceipt }
@@ -96,7 +100,14 @@ export function stepPlay(state: PlayState, event: PlayEvent): PlayState {
       return flow.kind === "table" && flow.overlay.kind === "role" && flow.overlay.roundNumber === event.roundNumber ? withFlow(state, { ...flow, overlay: { kind: "none" } }) : state;
     case "roundSettled":
       if (flow.kind !== "table" || state.lastResultsRound === event.summary.roundNumber) return state;
-      return { ...withFlow(state, { ...flow, overlay: { kind: "results", summary: event.summary } }), lastResultsRound: event.summary.roundNumber };
+      return {
+        ...withFlow(state, { ...flow, overlay: { kind: "results", summary: event.summary, frame: event.frame } }),
+        lastResultsRound: event.summary.roundNumber,
+      };
+    case "openShare":
+      return flow.kind === "table" && flow.overlay.kind === "results" ? withFlow(state, { ...flow, overlay: { ...flow.overlay, kind: "share" } }) : state;
+    case "closeShare":
+      return flow.kind === "table" && flow.overlay.kind === "share" ? withFlow(state, { ...flow, overlay: { ...flow.overlay, kind: "results" } }) : state;
     case "anteAgain":
       return flow.kind === "table" && flow.overlay.kind === "results" ? withFlow(state, { ...flow, overlay: { kind: "none" } }) : state;
     case "cashOutStarted":
@@ -122,7 +133,7 @@ export function isTableOpenForPlay(state: PlayState): boolean {
   return state.drawer === null && state.flow.kind === "table" && state.flow.overlay.kind === "none";
 }
 
-export function summarizeRound(roundNumber: number, round: RecordedRound, ownSeat: number): RoundSummary | null {
+export function summarizeRound(roundNumber: number, round: RecordedRound, ownSeat: number, tableAddress: string): RoundSummary | null {
   const settled = round.events.findLast((event) => event.kind === "settled");
   const drawn = round.events.find((event) => event.kind === "whaleDrawn");
   if (settled?.kind !== "settled" || drawn?.kind !== "whaleDrawn") return null;
@@ -136,6 +147,7 @@ export function summarizeRound(roundNumber: number, round: RecordedRound, ownSea
     .map((beak) => ({ seat: beak.seat, name: nameOf(beak.seat), crumbs: beak.crumbs }));
   return {
     roundNumber,
+    tableAddress,
     whaleCrumbs: settled.whaleCrumbs,
     pigeonCrumbs: settled.pigeonCrumbs,
     ownSeat,

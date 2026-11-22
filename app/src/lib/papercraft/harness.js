@@ -460,7 +460,7 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
   const castShadowOnly = (object) => object.traverse((o) => { o.layers.set(SHADOW_ONLY_LAYER); o.castShadow = true; o.receiveShadow = false; });
   let focusOverride = null; const focusOverrideAt = new THREE.Vector3();
   const H = { THREE, P2, flags, renderer, scene, camera, paper, view, target, walk, hinges, spots, bounds, frame, heroHeight, groundAt, stack, dome,
-    printGround, popup, printed, cardOpts, inFrame, inReach, walkArea, sharpAt, lamp, glowing, hero: null, heroStride: null, stepHooks: [], onStep: (fn) => H.stepHooks.push(fn), restartHooks: [], onRestart: (fn) => H.restartHooks.push(fn), heroTurn: 'yaw', setHero: (h, { stride = null, turn = 'yaw' } = {}) => { H.hero = h; H.heroStride = stride; H.heroTurn = turn; }, start, setQuality: ({ renderScale: scale }) => { if (scale) renderScaleNow = clampScale(scale); }, focusOn: (point) => { focusOverride = point ? focusOverrideAt.copy(point) : null; }, castShadowOnly, keyLight: null, frameCost: { stepMs: 0, renderMs: 0 } };
+    printGround, popup, printed, cardOpts, inFrame, inReach, walkArea, sharpAt, lamp, glowing, hero: null, heroStride: null, stepHooks: [], onStep: (fn) => H.stepHooks.push(fn), restartHooks: [], onRestart: (fn) => H.restartHooks.push(fn), heroTurn: 'yaw', setHero: (h, { stride = null, turn = 'yaw' } = {}) => { H.hero = h; H.heroStride = stride; H.heroTurn = turn; }, start, setQuality: ({ renderScale: scale }) => { if (scale) renderScaleNow = clampScale(scale); }, focusOn: (point) => { focusOverride = point ? focusOverrideAt.copy(point) : null; }, castShadowOnly, keyLight: null, frameCost: { stepMs: 0, renderMs: 0 }, captureFrame: () => null };
 
   // ---- start: light, lens, choreography, input, walking, the loop and the capture hook -------------------------------
   function start() {
@@ -735,6 +735,15 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
       }
       post.render(time);
     }
+    // a copy of the next frame for a share image: drawn in the same task as the render, so it needs no
+    // preserveDrawingBuffer
+    H.captureFrame = () => {
+      render();
+      const copy = document.createElement('canvas');
+      copy.width = renderer.domElement.width; copy.height = renderer.domElement.height;
+      copy.getContext('2d').drawImage(renderer.domElement, 0, 0);
+      return copy;
+    };
     // ?safe=: a vertical platform's UI-safe area (buttons, caption) and the feed crops (4:5, 3:4, 1:1) over a 9:16
     // frame, as fractions [top, right, bottom, left] (references/formats.md); a preview aid, never part of the render
     const SAFE = { meta: [0.14, 0.06, 0.35, 0.06], tiktok: [0.125, 0.111, 0.344, 0.111], shorts: [0.15, 0.178, 0.35, 0.044], all: [0.15, 0.178, 0.35, 0.111] };
