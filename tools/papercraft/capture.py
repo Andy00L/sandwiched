@@ -172,7 +172,7 @@ def main():
     W, H = parse_size(a.size)
     if W % 2 or H % 2:
         print(f'note: {W}x{H} has an odd side; H.264 (yuv420p) needs even sides for a video')
-    page, _, page_q = a.page.partition('?')
+    page, _, page_q = a.page.partition('?') if '?' in a.page or '=' not in a.page else ('', '', a.page)
     port = None if a.url else serve(root)
     failed = False
     with sync_playwright() as p:
