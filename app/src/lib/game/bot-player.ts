@@ -1,11 +1,13 @@
 import { choosePigeonMove, chooseSwatBox, observeBotView, settlePigeon } from "./bots";
 import type { PlayerIntent } from "./click-intent";
+import { TICK_MS } from "./chain-rules";
 import type { RoundTiming, Temperament } from "./round-events";
 import type { TableStore } from "./table-store";
 
 export const BOT_REACTION_MIN_MS = 150;
 export const BOT_REACTION_MAX_MS = 450;
 const CLOCK_MARGIN_TICKS = 10;
+export const BOT_WHALE_REST_MS = 1_800;
 
 export type BotBrainPorts = {
   store: TableStore;
@@ -30,7 +32,7 @@ export function chooseBotIntent(store: TableStore, temperament: Temperament, tim
     if (view.raisedHandBox !== null || tick < memory.nextRaiseTick) return null;
     const box = chooseSwatBox(view);
     if (box === null) return null;
-    memory.nextRaiseTick = tick + timing.swatWindupTicks + timing.swatCooldownTicks + CLOCK_MARGIN_TICKS;
+    memory.nextRaiseTick = tick + timing.swatWindupTicks + timing.swatCooldownTicks + CLOCK_MARGIN_TICKS + BOT_WHALE_REST_MS / TICK_MS;
     return { actor: "whale", box };
   }
   const intent = choosePigeonMove(temperament, settlePigeon(seat.pigeon, cautiousTick), tick >= memory.nextPeckTick, view);
