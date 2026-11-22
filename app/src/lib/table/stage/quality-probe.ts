@@ -4,7 +4,7 @@ import { recordFrameTimes } from "./frame-recorder";
 type QualityTier = "high" | "medium";
 
 const QUALITY_STORAGE_KEY = "sandwich.qualityTier";
-const RENDER_SCALE_BY_TIER: Record<QualityTier, number> = { high: 1, medium: 0.67 };
+const RENDER_SCALE_BY_TIER: Record<QualityTier, number> = { high: 1, medium: 0.6 };
 const PROBE_DELAY_MS = 2500;
 const PROBE_DURATION_MS = 2000;
 const HIGH_TIER_MEDIAN_FRAME_MS = 18;

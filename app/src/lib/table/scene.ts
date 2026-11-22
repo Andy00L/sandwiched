@@ -32,13 +32,15 @@ QA         plan/06 section 9: F0 to F13 captured with restart(); step(T).
 */
 import { createHarness } from "papercraft/harness.js";
 import type { Harness } from "papercraft/harness.js";
+import type { Object3D } from "three";
 import type { RecordedRound } from "../game/round-events";
 import { GROUND_INKS } from "./palette";
 import { placeOnTable } from "./layout";
 import { buildLunchbox, LUNCHBOX_LOOKS } from "./pieces/lunchbox";
 import { buildCrumbScatter, buildLunchClutter } from "./pieces/lunch";
 import { buildFlowerBed, buildHedge, buildLampPost, buildLitterBin, buildParkBench, buildParkSign, buildPlaneTree } from "./pieces/park";
-import { sittingPigeonCard, standingPigeonCard } from "./pieces/pigeon";
+import { PIGEON_VARIANTS, printCropBags, printPigeonKit, sittingPigeonCard } from "./pieces/pigeon";
+import { placeStandingPigeon } from "./pieces/pigeon-puppet";
 import { buildPicnicTable } from "./pieces/table";
 import { buildWhale, buildWhaleFluke } from "./pieces/whale";
 import { WHALE_MOODS } from "./pieces/whale-face";
@@ -103,13 +105,39 @@ function buildPark(harness: Harness, mode: SceneMode): void {
   if (mode.kind === "replay") {
     buildReplayScene(harness, picnicTable, whaleModel, boxes, mode.round);
   } else {
-    const pigeonYaw = -TABLE_YAW_RAD;
-    harness.popup(...standingPigeonCard("gary", "left"), { parent: deck, x: 5.3, z: BOX_ROW_DECK_Z + 0.4, yaw: pigeonYaw, order: boxOrder + 0.8 });
-    harness.popup(...standingPigeonCard("linda", "right"), { parent: deck, x: -BOX_SPACING_UNITS + 5.2, z: BOX_ROW_DECK_Z - 0.6, yaw: pigeonYaw, order: boxOrder + 0.9 });
+    buildSamplePigeons(harness, deck, boxOrder + 0.8);
     buildCrumbScatter(harness, deck, 3.6, BOX_ROW_DECK_Z + 1.4, boxOrder + 1.2);
     poseFaceWhenAsked(harness, whaleModel.face);
   }
   harness.setHero(whaleModel.whale);
+}
+
+const LINEUP_SPACING_UNITS = 4.6;
+const LINEUP_LAWN_Z = 17;
+
+function buildSamplePigeons(harness: Harness, deck: Object3D, order: number): void {
+  const options = harness.cardOpts(0, 0, 1, deck);
+  const cropBags = printCropBags(options);
+  if (new URLSearchParams(location.search).has("lineup")) {
+    PIGEON_VARIANTS.forEach((variant, variantIndex) => {
+      placeStandingPigeon(harness, null, printPigeonKit(harness.cardOpts(0, LINEUP_LAWN_Z, 1, null), variant), cropBags, {
+        along: (variantIndex - (PIGEON_VARIANTS.length - 1) / 2) * LINEUP_SPACING_UNITS,
+        deckZ: LINEUP_LAWN_Z,
+        facing: "right",
+        order: order + variantIndex * 0.05,
+        name: `pigeon ${variant}`,
+      });
+    });
+    return;
+  }
+  placeStandingPigeon(harness, deck, printPigeonKit(options, "gary"), cropBags, { along: 5.3, deckZ: BOX_ROW_DECK_Z + 0.4, facing: "left", order, name: "pigeon gary" });
+  placeStandingPigeon(harness, deck, printPigeonKit(options, "linda"), cropBags, {
+    along: -BOX_SPACING_UNITS + 5.2,
+    deckZ: BOX_ROW_DECK_Z - 0.6,
+    facing: "right",
+    order: order + 0.1,
+    name: "pigeon linda",
+  });
 }
 
 function poseFaceWhenAsked(harness: Harness, face: WhaleFace): void {

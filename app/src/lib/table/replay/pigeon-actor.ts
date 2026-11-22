@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import type { Harness, PlacedPiece } from "papercraft/harness.js";
-import type { Point } from "papercraft/lib/paperkit-2d.js";
-import { FlapSpring, Spring, makeCard } from "papercraft/lib/paperkit-3d.js";
-import type { PigeonVariant } from "../pieces/pigeon";
-import { standingPigeonCard } from "../pieces/pigeon";
+import { FlapSpring, Spring } from "papercraft/lib/paperkit-3d.js";
+import { cropBagStageFor, printPigeonKit } from "../pieces/pigeon";
+import type { CropBagPrints, PigeonKit, PigeonVariant } from "../pieces/pigeon";
+import { buildPigeonPuppet } from "../pieces/pigeon-puppet";
 import {
   BONK_TILT_RAD,
   FLATTEN_MS,
@@ -21,6 +21,11 @@ import type { Facing, PerchSpot } from "./perches";
 const FLAT_RAD = Math.PI / 2 - 0.03;
 const PECK_HOLD_REPLAY_MS = 40;
 const FOLD_AWAY_MS = 240;
+const NECK_PECK_RAD = 0.85;
+const TAIL_COUNTER_RAD = THREE.MathUtils.degToRad(10);
+const BODY_PECK_RAD = 0.12;
+const WING_FLAP_RAD = THREE.MathUtils.degToRad(32);
+const WING_FLAP_HZ = 9;
 
 export type PigeonPose =
   | { kind: "hidden" }
@@ -34,19 +39,12 @@ export interface PigeonActor {
   readonly piece: PlacedPiece;
   update(pose: PigeonPose, nowTick: number, tickMs: number, dtSeconds: number): void;
   peck(atTick: number): void;
+  showBeakCrumbs(beakCrumbs: number): void;
   reset(): void;
 }
 
-export interface PigeonPrint {
-  outline: Point[];
-  materials: THREE.Material | THREE.Material[];
-}
-
-export function printPigeonVariant(harness: Harness, deck: THREE.Object3D, variant: PigeonVariant): PigeonPrint {
-  const [outline, paint] = standingPigeonCard(variant, "right");
-  const [, paintFacingLeft] = standingPigeonCard(variant, "left");
-  const card = makeCard(outline, { ...harness.cardOpts(0, 0, 1, deck), paint, back: paintFacingLeft, backRes: 1 });
-  return { outline, materials: card.material };
+export function printPigeonVariant(harness: Harness, deck: THREE.Object3D, variant: PigeonVariant): PigeonKit {
+  return printPigeonKit(harness.cardOpts(0, 0, 1, deck), variant);
 }
 
 function smoothstep(progress: number): number {
@@ -54,8 +52,14 @@ function smoothstep(progress: number): number {
   return clamped * clamped * (3 - 2 * clamped);
 }
 
-function facingAngle(facing: Facing): number {
-  return -TABLE_YAW_RAD + (facing === "left" ? Math.PI : 0);
+function facingTarget(facing: Facing): number {
+  return facing === "left" ? 1 : 0;
+}
+
+function applyTurn(turnPivot: THREE.Object3D, turnProgress: number): void {
+  const progress = Math.min(1, Math.max(0, turnProgress));
+  turnPivot.rotation.y = -TABLE_YAW_RAD + Math.min(progress, 1 - progress) * Math.PI;
+  turnPivot.scale.x = progress > 0.5 ? -1 : 1;
 }
 
 function peckTilt(elapsedMs: number): number {
@@ -69,19 +73,17 @@ function peckTilt(elapsedMs: number): number {
   return -PECK_TILT_RAD * (1 - smoothstep(recover)) + overshoot;
 }
 
-export function createPigeonActor(harness: Harness, deck: THREE.Object3D, print: PigeonPrint, seat: number, order: number): PigeonActor {
-  const options = harness.cardOpts(0, 0, 1, deck);
-  const card = makeCard(print.outline, { ...options, materials: print.materials, seed: 900 + seat });
-  card.name = `pigeon seat ${seat}`;
+export function createPigeonActor(harness: Harness, deck: THREE.Object3D, kit: PigeonKit, cropBags: CropBagPrints, seat: number, order: number): PigeonActor {
+  const puppet = buildPigeonPuppet(kit, cropBags, harness.cardOpts(0, 0, 1, deck), `pigeon seat ${seat}`);
   const turnPivot = new THREE.Group();
   const tiltPivot = new THREE.Group();
   const foldPivot = new THREE.Group();
-  tiltPivot.add(card);
+  tiltPivot.add(puppet.root);
   turnPivot.add(tiltPivot);
   foldPivot.add(turnPivot);
   const piece = harness.popup(null, null, { node: foldPivot, height: 3.6, parent: deck, x: 0, z: 0, yaw: 0, order, level: true });
 
-  const turnSpring = new Spring({ value: facingAngle("right"), hz: 3.2, zeta: 0.75 });
+  const turnSpring = new Spring({ value: facingTarget("right"), hz: 3.2, zeta: 0.75 });
   const riseSpring = new FlapSpring({ p: 1, size: 0.3 });
   const bonkSpring = new FlapSpring({ p: 1, size: 0.3 });
   let lastPeckTick = Number.NEGATIVE_INFINITY;
@@ -118,15 +120,23 @@ export function createPigeonActor(harness: Harness, deck: THREE.Object3D, print:
     peck(atTick) {
       lastPeckTick = atTick;
     },
+    showBeakCrumbs(beakCrumbs) {
+      puppet.setCropStage(cropBagStageFor(beakCrumbs));
+    },
     reset() {
       lastPeckTick = Number.NEGATIVE_INFINITY;
       wasStunnedBy = null;
       wasHidden = true;
       riseSpring.reset(1);
       bonkSpring.reset(1);
-      turnSpring.reset(facingAngle("right"));
+      turnSpring.reset(facingTarget("right"));
+      applyTurn(turnPivot, 0);
       foldPivot.rotation.set(0, 0, 0);
       tiltPivot.rotation.set(0, 0, 0);
+      puppet.neck.rotation.set(0, 0, 0);
+      puppet.tail.rotation.set(0, 0, 0);
+      for (const wing of puppet.wings) wing.rotation.set(0, 0, 0);
+      puppet.setCropStage("empty");
       piece.group.visible = true;
     },
     update(pose, nowTick, tickMs, dtSeconds) {
@@ -163,14 +173,20 @@ export function createPigeonActor(harness: Harness, deck: THREE.Object3D, print:
         placeAt(pose.spot.along, 0, pose.spot.deckZ);
         facing = pose.spot.facing;
       }
-      turnSpring.set(facingAngle(facing));
-      turnPivot.rotation.y = turnSpring.step(dtSeconds);
+      turnSpring.set(facingTarget(facing));
+      applyTurn(turnPivot, turnSpring.step(dtSeconds));
       if (pose.kind === "stunned") {
         applyStun(pose, nowTick, tickMs, dtSeconds);
         return;
       }
       settleAfterStun(dtSeconds);
-      if (pose.kind === "perched") tiltPivot.rotation.z += peckTilt((nowTick - lastPeckTick) * tickMs);
+      const isAirborne = pose.kind === "flying" || pose.kind === "hovering";
+      const flap = isAirborne ? Math.sin(((nowTick * tickMs) / 1000) * Math.PI * 2 * WING_FLAP_HZ + seat) * WING_FLAP_RAD : 0;
+      for (const wing of puppet.wings) wing.rotation.z = flap;
+      const peckDepth = pose.kind === "perched" ? -peckTilt((nowTick - lastPeckTick) * tickMs) / PECK_TILT_RAD : 0;
+      puppet.neck.rotation.z = -peckDepth * NECK_PECK_RAD;
+      puppet.tail.rotation.z = -peckDepth * TAIL_COUNTER_RAD;
+      tiltPivot.rotation.z += -peckDepth * BODY_PECK_RAD;
     },
   };
 }

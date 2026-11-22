@@ -8,15 +8,15 @@ import { HOVER_HEIGHT_UNITS, REVEAL_LID_STAGGER_S } from "../motion/motion-token
 import { crumbOutline, mothCard, paintCrumb, SANDWICH_BITE_STAGES, sandwichCard } from "../pieces/lunch";
 import { LUNCHBOX_DEPTH_UNITS, LUNCHBOX_HEIGHT_UNITS, LUNCHBOX_WIDTH_UNITS } from "../pieces/lunchbox";
 import type { LunchboxModel } from "../pieces/lunchbox";
-import { PIGEON_VARIANTS } from "../pieces/pigeon";
-import type { PigeonVariant } from "../pieces/pigeon";
+import { PIGEON_VARIANTS, printCropBags } from "../pieces/pigeon";
+import type { PigeonKit, PigeonVariant } from "../pieces/pigeon";
 import type { PicnicTable } from "../pieces/table";
 import { restHandPosition, TOWARD_CAMERA_IN_WHALE } from "../pieces/whale";
 import type { WhaleModel } from "../pieces/whale";
 import { poseArm } from "./arm-rig";
 import type { ArmRig } from "./arm-rig";
 import { createPigeonActor, printPigeonVariant } from "./pigeon-actor";
-import type { PigeonActor, PigeonPose, PigeonPrint } from "./pigeon-actor";
+import type { PigeonActor, PigeonPose } from "./pigeon-actor";
 import { BOX_ROW_DECK_Z, boxAlong, hoverSpot, perchSpot } from "./perches";
 import type { PerchSpot } from "./perches";
 import { createRoundDirector } from "./round-director";
@@ -150,12 +150,13 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
   const { boxCount, tickMs } = round;
   const director = createRoundDirector(round);
   const order = table.table.order + 1.2;
-  const prints = new Map<PigeonVariant, PigeonPrint>();
+  const kits = new Map<PigeonVariant, PigeonKit>();
+  const cropBags = printCropBags(harness.cardOpts(0, 0, 1, deck));
   const actors = round.players.map((player, playerIndex) => {
     const variant = PIGEON_VARIANTS[player.variant % PIGEON_VARIANTS.length] ?? "gary";
-    const print = prints.get(variant) ?? printPigeonVariant(harness, deck, variant);
-    prints.set(variant, print);
-    const actor: PigeonActor = createPigeonActor(harness, deck, print, player.seat, order + playerIndex * 0.05);
+    const kit = kits.get(variant) ?? printPigeonVariant(harness, deck, variant);
+    kits.set(variant, kit);
+    const actor: PigeonActor = createPigeonActor(harness, deck, kit, cropBags, player.seat, order + playerIndex * 0.05);
     return { seat: player.seat, actor, hover: hoverSpot(playerIndex, round.players.length) };
   });
   const actorBySeat = new Map(actors.map((entry) => [entry.seat, entry.actor]));
@@ -257,7 +258,11 @@ export function buildReplayScene(harness: Harness, table: PicnicTable, whale: Wh
       if (event.kind === "pecked" && event.outcome !== "emptyBox") actorBySeat.get(event.seat)?.peck(event.tick);
       if (event.kind === "swatLanded" && event.hits.length >= SPOUT_MIN_HITS) whale.face.popSpout(timeSeconds * 1000);
     }
-    for (const { seat, actor, hover } of actors) actor.update(toPigeonPose(director.poseOf(seat, nowTick), hover, boxCount), nowTick, tickMs, dtSeconds);
+    const beakCrumbsBySeat = new Map(director.view().seats.map((seatView) => [seatView.seat, seatView.beakCrumbs]));
+    for (const { seat, actor, hover } of actors) {
+      actor.update(toPigeonPose(director.poseOf(seat, nowTick), hover, boxCount), nowTick, tickMs, dtSeconds);
+      actor.showBeakCrumbs(beakCrumbsBySeat.get(seat) ?? 0);
+    }
     poseArms(nowTick);
     actFace(nowTick, timeSeconds * 1000, dtSeconds);
     showCrumbs(director.view().looseCrumbs);

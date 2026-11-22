@@ -1,6 +1,9 @@
+import type * as THREE from "three";
 import * as P2 from "papercraft/lib/paperkit-2d.js";
-import type { Ink, PaintFn, Point } from "papercraft/lib/paperkit-2d.js";
-import { PALETTE } from "../palette";
+import type { Ink, PaintFn, Point, Print } from "papercraft/lib/paperkit-2d.js";
+import { makeCard } from "papercraft/lib/paperkit-3d.js";
+import type { CardOptions } from "papercraft/lib/paperkit-3d.js";
+import { KRAFT_INKS, PALETTE } from "../palette";
 
 const PIGEON_HEAD = "#6c7484";
 const PIGEON_WING = "#b2b9c3";
@@ -117,9 +120,8 @@ export function sittingPigeonCard(): [Point[], PaintFn] {
 
 export const PIGEON_VARIANTS = ["gary", "linda", "doug", "brenda", "keith", "sheila"] as const;
 export type PigeonVariant = (typeof PIGEON_VARIANTS)[number];
-type PigeonFacing = "left" | "right";
 
-interface StandingShape {
+export interface StandingShape {
   bodyRadiusX: number;
   bodyRadiusY: number;
   bellyScale: number;
@@ -139,7 +141,7 @@ const STANDING_SHAPES: Record<PigeonVariant, StandingShape> = {
   sheila: { bodyRadiusX: 1.4, bodyRadiusY: 1.12, bellyScale: 1.35, neckHeight: 0.66, headRadius: 0.55, tailLift: 0.1, tailLength: 1.35, sheen: PALETTE.plum },
 };
 
-interface PigeonAnchors {
+export interface PigeonAnchors {
   bodyY: number;
   neckX: number;
   neckY: number;
@@ -158,17 +160,17 @@ function pigeonAnchors(shape: StandingShape): PigeonAnchors {
   return { bodyY, neckX, neckY, headX, headY, eyeX: headX + shape.headRadius * 0.28, eyeY: headY + shape.headRadius * 0.2 };
 }
 
-function drawLegs(context: CanvasRenderingContext2D, ink: Ink): void {
+export const LEG_TOP_UNITS = 1.15;
+
+function drawLeg(context: CanvasRenderingContext2D, ink: Ink): void {
   context.fillStyle = ink(PALETTE.plum);
-  for (const legX of [-0.3, 0.3]) {
-    P2.draw2.rect(context, legX - 0.11, 0.1, 0.22, 1.05, 0.08);
-    fillPolygon(context, [
-      [legX - 0.42, 0],
-      [legX + 0.5, 0],
-      [legX + 0.34, 0.18],
-      [legX - 0.3, 0.18],
-    ]);
-  }
+  P2.draw2.rect(context, -0.11, 0.1, 0.22, LEG_TOP_UNITS - 0.1, 0.08);
+  fillPolygon(context, [
+    [-0.42, 0],
+    [0.5, 0],
+    [0.34, 0.18],
+    [-0.3, 0.18],
+  ]);
 }
 
 function drawTail(context: CanvasRenderingContext2D, ink: Ink, shape: StandingShape, bodyY: number): void {
@@ -176,24 +178,30 @@ function drawTail(context: CanvasRenderingContext2D, ink: Ink, shape: StandingSh
   const lift = shape.tailLift;
   context.fillStyle = ink(PIGEON_TAIL);
   fillPolygon(context, [
-    [-0.8, bodyY + 0.15],
+    [-0.55, bodyY + 0.15],
     [tipX + 0.05, bodyY - 0.35 + lift],
     [tipX - 0.02, bodyY - 0.7 + lift],
     [tipX + 0.2, bodyY - 0.95 + lift],
-    [-0.8, bodyY - 0.45],
+    [-0.55, bodyY - 0.45],
+  ]);
+  context.fillStyle = ink(P2.mix(PIGEON_TAIL, PALETTE.creamCore, 0.4));
+  fillPolygon(context, [
+    [tipX + 0.38, bodyY - 0.42 + lift * 0.8],
+    [tipX + 0.05, bodyY - 0.35 + lift],
+    [tipX - 0.02, bodyY - 0.7 + lift],
+    [tipX + 0.2, bodyY - 0.95 + lift],
+    [tipX + 0.5, bodyY - 0.86 + lift * 0.8],
   ]);
 }
 
-function drawBackAccessory(variant: PigeonVariant, context: CanvasRenderingContext2D, ink: Ink, anchors: PigeonAnchors): void {
-  if (variant !== "linda") return;
-  context.fillStyle = ink(PALETTE.teal);
-  P2.draw2.rect(context, -1.55, anchors.bodyY + 0.15, 1.15, 1.05, 0.22);
-  context.fillStyle = ink(P2.shade(PALETTE.teal, -0.2));
-  P2.draw2.rect(context, -1.5, anchors.bodyY + 0.2, 1.05, 0.3, 0.12);
-}
-
-function drawBody(context: CanvasRenderingContext2D, ink: Ink, shape: StandingShape, anchors: PigeonAnchors): void {
+function drawBody(variant: PigeonVariant, context: CanvasRenderingContext2D, ink: Ink, shape: StandingShape, anchors: PigeonAnchors): void {
   const { bodyY, neckX, neckY } = anchors;
+  if (variant === "linda") {
+    context.fillStyle = ink(PALETTE.teal);
+    P2.draw2.rect(context, -1.55, bodyY + 0.15, 1.15, 1.05, 0.22);
+    context.fillStyle = ink(P2.shade(PALETTE.teal, -0.2));
+    P2.draw2.rect(context, -1.5, bodyY + 0.2, 1.05, 0.3, 0.12);
+  }
   context.fillStyle = ink(PALETTE.pigeonGrey);
   fillPolygon(context, eggOutline(0.05, bodyY, shape.bodyRadiusX, shape.bodyRadiusY, 0.3).map(([pointX, pointY]): Point => [pointX, Math.max(0.6, pointY)]));
   context.fillStyle = ink(PIGEON_BELLY);
@@ -205,6 +213,13 @@ function drawBody(context: CanvasRenderingContext2D, ink: Ink, shape: StandingSh
   P2.draw2.ell(context, neckX, neckY + shape.neckHeight * 0.35, 0.5, 0.45 + shape.neckHeight * 0.5, -0.3);
   context.fillStyle = ink(shape.sheen);
   P2.draw2.ell(context, neckX + 0.04, neckY + shape.neckHeight * 0.3, 0.48, 0.32 + shape.neckHeight * 0.32, -0.3);
+  if (variant === "brenda") {
+    context.fillStyle = ink(PALETTE.creamCore);
+    for (let pearl = 0; pearl < 5; pearl++) {
+      const angle = -0.9 + pearl * 0.42;
+      P2.draw2.ell(context, neckX + Math.cos(angle) * 0.42, neckY + 0.1 + Math.sin(angle) * 0.2, 0.1, 0.1);
+    }
+  }
 }
 
 function drawWing(variant: PigeonVariant, context: CanvasRenderingContext2D, ink: Ink, bodyY: number): void {
@@ -218,6 +233,10 @@ function drawWing(variant: PigeonVariant, context: CanvasRenderingContext2D, ink
     [-0.55, bodyY - 0.32],
     [0.45, bodyY - 0.02],
   ]);
+  for (let feather = 0; feather < FEATHER_COUNT; feather++) {
+    context.fillStyle = ink(P2.shade(PIGEON_WING, -0.1 - 0.07 * feather));
+    P2.draw2.ell(context, -1.45 + feather * 0.42, bodyY - 0.12 + feather * 0.06, 0.4, 0.22, 0.3);
+  }
   context.fillStyle = ink(PIGEON_BAR);
   fillPolygon(context, [
     [-0.05, bodyY + 0.62],
@@ -242,8 +261,8 @@ function drawWing(variant: PigeonVariant, context: CanvasRenderingContext2D, ink
   }
   if (variant === "keith") {
     context.fillStyle = ink(PIGEON_WING);
-    P2.draw2.ell(context, -0.9, bodyY + 0.95, 0.42, 0.14, 0.9);
-    P2.draw2.ell(context, -0.4, bodyY + 1.0, 0.36, 0.12, -0.7);
+    P2.draw2.ell(context, -0.9, bodyY + 0.74, 0.42, 0.14, 0.9);
+    P2.draw2.ell(context, -0.4, bodyY + 0.86, 0.36, 0.12, -0.7);
     context.fillStyle = ink(PALETTE.creamCore);
     P2.draw2.rect(context, 0.2, bodyY - 0.5, 0.5, 0.18, 0.05);
     P2.draw2.rect(context, 0.36, bodyY - 0.66, 0.18, 0.5, 0.05);
@@ -251,27 +270,11 @@ function drawWing(variant: PigeonVariant, context: CanvasRenderingContext2D, ink
 }
 
 function drawHead(variant: PigeonVariant, context: CanvasRenderingContext2D, ink: Ink, shape: StandingShape, anchors: PigeonAnchors): void {
-  const { headX, headY, eyeX, eyeY, neckX, neckY } = anchors;
-  if (variant === "brenda") {
-    context.fillStyle = ink(PALETTE.creamCore);
-    for (let pearl = 0; pearl < 5; pearl++) {
-      const angle = -0.9 + pearl * 0.42;
-      P2.draw2.ell(context, neckX + Math.cos(angle) * 0.42, neckY + 0.1 + Math.sin(angle) * 0.2, 0.1, 0.1);
-    }
-  }
+  const { headX, headY, eyeX, eyeY } = anchors;
   context.fillStyle = ink(PIGEON_HEAD);
   P2.draw2.ell(context, headX, headY, shape.headRadius + 0.04, shape.headRadius);
-  const beakBaseX = headX + shape.headRadius * 0.82;
-  context.fillStyle = ink(PALETTE.mustard);
-  fillPolygon(context, [
-    [beakBaseX, headY + 0.13],
-    [beakBaseX + 0.62, headY - 0.04],
-    [beakBaseX, headY - 0.22],
-  ]);
-  context.fillStyle = ink(PALETTE.creamCore);
-  P2.draw2.ell(context, beakBaseX + 0.06, headY + 0.08, 0.13, 0.08, -0.2);
-  context.fillStyle = ink(PALETTE.ink, "print");
-  P2.draw2.ell(context, beakBaseX + 0.52, headY - 0.04, 0.09, 0.08);
+  context.fillStyle = ink(PALETTE.pigeonGrey);
+  P2.draw2.ell(context, headX - 0.12, headY - shape.headRadius * 0.7, shape.headRadius * 0.62, shape.headRadius * 0.5, -0.3);
   context.fillStyle = ink(PALETTE.mustard, "print");
   P2.draw2.ell(context, eyeX, eyeY, 0.21, 0.21);
   context.fillStyle = ink(PALETTE.ink, "print");
@@ -284,12 +287,6 @@ function drawHead(variant: PigeonVariant, context: CanvasRenderingContext2D, ink
     context.arc(eyeX, eyeY, 0.36, 0, Math.PI * 2);
     context.arc(eyeX, eyeY, 0.25, 0, Math.PI * 2, true);
     context.fill();
-    context.strokeStyle = PALETTE.ink;
-    context.lineWidth = 0.05;
-    context.beginPath();
-    context.moveTo(eyeX - 0.2, eyeY - 0.3);
-    context.quadraticCurveTo(eyeX - 0.5, eyeY - 1.0, eyeX - 0.1, anchors.bodyY + 0.6);
-    context.stroke();
   }
   if (variant === "doug") {
     context.fillStyle = ink(KRAFT_CAP);
@@ -322,31 +319,137 @@ function drawHead(variant: PigeonVariant, context: CanvasRenderingContext2D, ink
   }
 }
 
-function drawStandingPigeon(variant: PigeonVariant, context: CanvasRenderingContext2D, ink: Ink): void {
-  const shape = STANDING_SHAPES[variant];
-  const anchors = pigeonAnchors(shape);
-  drawLegs(context, ink);
-  drawTail(context, ink, shape, anchors.bodyY);
-  drawBackAccessory(variant, context, ink, anchors);
-  drawBody(context, ink, shape, anchors);
-  drawWing(variant, context, ink, anchors.bodyY);
-  drawHead(variant, context, ink, shape, anchors);
+function drawBeak(context: CanvasRenderingContext2D, ink: Ink, shape: StandingShape, anchors: PigeonAnchors): void {
+  const beakBaseX = anchors.headX + shape.headRadius * 0.82;
+  const { headY } = anchors;
+  context.fillStyle = ink(PALETTE.mustard);
+  fillPolygon(context, [
+    [beakBaseX - 0.08, headY + 0.15],
+    [beakBaseX + 0.62, headY - 0.04],
+    [beakBaseX - 0.08, headY - 0.24],
+  ]);
+  context.fillStyle = ink(PALETTE.creamCore);
+  P2.draw2.ell(context, beakBaseX + 0.06, headY + 0.08, 0.13, 0.08, -0.2);
+  context.fillStyle = ink(PALETTE.ink, "print");
+  P2.draw2.ell(context, beakBaseX + 0.52, headY - 0.04, 0.09, 0.08);
 }
 
-export function standingPigeonCard(variant: PigeonVariant, facing: PigeonFacing): [Point[], PaintFn] {
-  const direction = facing === "right" ? 1 : -1;
-  const [outline, paintParts] = P2.drawnPiece(
-    (context, ink) => {
-      context.save();
-      context.scale(direction, 1);
-      drawStandingPigeon(variant, context, ink);
-      context.restore();
-    },
-    { w: 5.6, h: 4.3, name: `pigeon ${variant}` },
-  );
+export type PigeonPartName = "leg" | "tail" | "body" | "wing" | "head" | "beak";
+
+export interface PigeonPartPrint {
+  outline: Point[];
+  materials: THREE.Material | THREE.Material[];
+}
+
+export interface PigeonKit {
+  parts: Record<PigeonPartName, PigeonPartPrint>;
+  shape: StandingShape;
+  anchors: PigeonAnchors;
+}
+
+type PartDrawing = (context: CanvasRenderingContext2D, ink: Ink) => void;
+
+const PART_CANVAS = { w: 6.4, h: 4.9 };
+const CUT_INK: Ink = (_color, how) => (how === "print" ? "rgba(0,0,0,0)" : "#000");
+
+function finishPart(print: Print): void {
+  print.marks("dot", { color: "#2a1608", alpha: 0.12, size: 0.025, density: 0.4 });
+  print.innerShade("#3a2010", { alpha: 0.3, blurPx: 8 });
+  print.felt(0.7);
+}
+
+function printPart(options: CardOptions, draw: PartDrawing, name: string): PigeonPartPrint {
+  const outline = P2.fromDrawing((context) => draw(context, CUT_INK), { ...PART_CANVAS, name });
   const paint: PaintFn = (print) => {
-    paintParts(print);
-    print.felt(0.7);
+    print.parts((context, ink) => draw(context, ink));
+    finishPart(print);
   };
-  return [outline, paint];
+  const card = makeCard(outline, { ...options, paint, back: "kraft" });
+  return { outline, materials: card.material };
+}
+
+export function printPigeonKit(options: CardOptions, variant: PigeonVariant): PigeonKit {
+  const shape = STANDING_SHAPES[variant];
+  const anchors = pigeonAnchors(shape);
+  return {
+    shape,
+    anchors,
+    parts: {
+      leg: printPart(options, drawLeg, `pigeon ${variant} leg`),
+      tail: printPart(options, (context, ink) => drawTail(context, ink, shape, anchors.bodyY), `pigeon ${variant} tail`),
+      body: printPart(options, (context, ink) => drawBody(variant, context, ink, shape, anchors), `pigeon ${variant} body`),
+      wing: printPart(options, (context, ink) => drawWing(variant, context, ink, anchors.bodyY), `pigeon ${variant} wing`),
+      head: printPart(options, (context, ink) => drawHead(variant, context, ink, shape, anchors), `pigeon ${variant} head`),
+      beak: printPart(options, (context, ink) => drawBeak(context, ink, shape, anchors), `pigeon ${variant} beak`),
+    },
+  };
+}
+
+export const CROP_BAG_STAGES = ["empty", "few", "half", "full", "bursting"] as const;
+export type CropBagStage = (typeof CROP_BAG_STAGES)[number];
+const CROP_BAG_FILL: Record<CropBagStage, number> = { empty: 0, few: 0.3, half: 0.55, full: 0.85, bursting: 1 };
+
+export function cropBagStageFor(beakCrumbs: number): CropBagStage {
+  if (beakCrumbs >= 50) return "bursting";
+  if (beakCrumbs >= 25) return "full";
+  if (beakCrumbs >= 10) return "half";
+  if (beakCrumbs >= 1) return "few";
+  return "empty";
+}
+
+const CROP_BAG_WIDTH_UNITS = 0.7;
+const CROP_BAG_HEIGHT_UNITS = 0.8;
+
+function cropBagOutline(): Point[] {
+  const halfWidth = CROP_BAG_WIDTH_UNITS / 2;
+  return [
+    [-halfWidth, 0],
+    [halfWidth, 0],
+    [halfWidth + 0.05, CROP_BAG_HEIGHT_UNITS],
+    [halfWidth * 0.5, CROP_BAG_HEIGHT_UNITS - 0.08],
+    [0, CROP_BAG_HEIGHT_UNITS + 0.02],
+    [-halfWidth * 0.5, CROP_BAG_HEIGHT_UNITS - 0.08],
+    [-halfWidth - 0.05, CROP_BAG_HEIGHT_UNITS],
+  ];
+}
+
+function paintCropBag(stage: CropBagStage): PaintFn {
+  return (print) => {
+    print.gradient(KRAFT_INKS.wood, KRAFT_INKS.woodDark, 0.5);
+    const fill = CROP_BAG_FILL[stage];
+    if (fill > 0) {
+      print.layer((context) => {
+        context.fillRect(-CROP_BAG_WIDTH_UNITS, 0.08, CROP_BAG_WIDTH_UNITS * 2, (CROP_BAG_HEIGHT_UNITS - 0.16) * fill);
+      }, PALETTE.mustard, { depth: 0.5 });
+    }
+    if (stage === "bursting") {
+      print.layer((context) => {
+        P2.draw2.ell(context, -0.12, CROP_BAG_HEIGHT_UNITS - 0.05, 0.14, 0.1);
+        P2.draw2.ell(context, 0.14, CROP_BAG_HEIGHT_UNITS - 0.02, 0.12, 0.09);
+      }, P2.shade(PALETTE.mustard, 0.1), { depth: 0.6 });
+    }
+    print.draw((context) => {
+      context.strokeStyle = P2.rgba(PALETTE.ink, 0.55);
+      context.lineWidth = 0.05;
+      context.beginPath();
+      context.moveTo(-CROP_BAG_WIDTH_UNITS / 2 + 0.08, CROP_BAG_HEIGHT_UNITS - 0.2);
+      context.lineTo(CROP_BAG_WIDTH_UNITS / 2 - 0.08, CROP_BAG_HEIGHT_UNITS - 0.2);
+      context.stroke();
+    });
+    print.felt(0.6);
+  };
+}
+
+export interface CropBagPrints {
+  outline: Point[];
+  materials: Record<CropBagStage, THREE.Material | THREE.Material[]>;
+}
+
+export function printCropBags(options: CardOptions): CropBagPrints {
+  const outline = cropBagOutline();
+  const printStage = (stage: CropBagStage) => makeCard(outline, { ...options, paint: paintCropBag(stage), back: "kraft" }).material;
+  return {
+    outline,
+    materials: { empty: printStage("empty"), few: printStage("few"), half: printStage("half"), full: printStage("full"), bursting: printStage("bursting") },
+  };
 }
