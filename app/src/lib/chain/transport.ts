@@ -77,6 +77,7 @@ export type BlockhashSource = Pick<Connection, "getLatestBlockhash">;
 
 export type BlockhashCache = {
   start: () => Promise<Result<string>>;
+  peek: () => string | null;
   stop: () => void;
   ready: () => Promise<string | null>;
   invalidate: () => void;
@@ -112,6 +113,7 @@ export const createBlockhashCache = (source: BlockhashSource, refreshMs: number)
       if (timer !== null) clearInterval(timer);
       timer = null;
     },
+    peek: () => (latest !== null && performance.now() - latest.fetchedAtMs < refreshMs * STALE_AFTER_REFRESHES ? latest.blockhash : null),
     ready: async () => {
       if (latest !== null && performance.now() - latest.fetchedAtMs < refreshMs * STALE_AFTER_REFRESHES) return latest.blockhash;
       const refreshed = await start();
@@ -202,6 +204,27 @@ export const sendOnRollup = async (
   if (!first.isBlockhashMissing) return first.ack;
   blockhashes.invalidate();
   return (await sendOnRollupOnce(rollupUrl, blockhashes, instructions, signers)).ack;
+};
+
+export const sendOnRollupOnExit = (rollupUrl: string, blockhashes: BlockhashCache, instructions: TransactionInstruction[], signer: Keypair): boolean => {
+  const blockhash = blockhashes.peek();
+  if (blockhash === null) return false;
+  const transaction = new Transaction({ feePayer: signer.publicKey, recentBlockhash: blockhash }).add(...instructions);
+  const signed = attemptSync(() => transaction.sign(signer));
+  if (!signed.ok) return false;
+  const serialized = serializeTransaction(transaction, true);
+  if (!serialized.ok) return false;
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "sendTransaction",
+    params: [serialized.value.toString("base64"), { encoding: "base64", skipPreflight: true }],
+  });
+  // A keepalive request that needs a CORS preflight is dropped when the page unloads; text/plain keeps it a simple request.
+  void fetchWithTimeout(rollupUrl, { method: "POST", headers: { "content-type": "text/plain;charset=UTF-8" }, body, keepalive: true }, RPC_REQUEST_TIMEOUT_MS).catch(
+    () => undefined,
+  );
+  return true;
 };
 
 export type BaseSubmission = { signature: string; blockhash: string; lastValidBlockHeight: number; submittedAtMs: number };

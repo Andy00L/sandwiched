@@ -5,7 +5,7 @@ import type { ChainClient } from "../chain/client";
 import { readDelegationStatus } from "../chain/delegation";
 import { createDepositChain, createDepositQueue } from "../chain/deposits";
 import type { KeyStore } from "../chain/key-store";
-import { claimTestUsdc, createSeatActions, sitAtTable, withdrawToBase } from "../chain/player";
+import { type PreparedLeave, claimTestUsdc, createSeatActions, sitAtTable, withdrawToBase } from "../chain/player";
 import { type Result, failure, success } from "../chain/result";
 import { createSessionKeeper } from "../chain/session";
 import { type RollupAck, type TransactionSigner, readTokenUnits } from "../chain/transport";
@@ -33,7 +33,13 @@ export type CashOutReceipt =
   | { kind: "onRollup"; chips: bigint; units: bigint; reason: string }
   | { kind: "untouched"; reason: string };
 
-export type GuestPlayChain = { guest: GuestChain; actions: PlayerActions; needs: GuestNeeds; cashOut: () => Promise<Result<CashOutReceipt>> };
+export type GuestPlayChain = {
+  guest: GuestChain;
+  actions: PlayerActions;
+  needs: GuestNeeds;
+  cashOut: () => Promise<Result<CashOutReceipt>>;
+  prepareLeave: () => Promise<Result<PreparedLeave>>;
+};
 
 const fromAck = (label: string, ack: RollupAck): Result<string> =>
   ack.ok ? success(ack.signature) : failure(`[${label}] ${ack.errorName} ${ack.detail}`);
@@ -135,5 +141,11 @@ export function createGuestPlayChain({ client, wallet, table, tableSnapshot, key
     return success({ kind: "withdrawn", chips, units: withdrawn.value.units, baseSignature: withdrawn.value.signature });
   };
 
-  return { guest: { readFacts, run }, actions, needs, cashOut };
+  const prepareLeave = async (): Promise<Result<PreparedLeave>> => {
+    const seat = await fetchSeat(client.programs.sandwich, client.rollup, seatAddress);
+    if (!seat.ok) return failure(`[prepareLeave] seat: ${seat.reason}`);
+    return seatActions.prepareLeave(seat.value?.chips ?? 0n);
+  };
+
+  return { guest: { readFacts, run }, actions, needs, cashOut, prepareLeave };
 }

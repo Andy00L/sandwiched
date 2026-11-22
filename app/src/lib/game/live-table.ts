@@ -8,8 +8,9 @@ import type { KeyStore } from "../chain/key-store";
 import { type SandwichProgram, createChainPrograms } from "../chain/program";
 import { type Result, attemptSync, failure, success } from "../chain/result";
 import { createRpcConnection } from "../chain/rpc";
-import { type FeePayment, createKeypairSigner } from "../chain/transport";
+import { type FeePayment, createKeypairSigner, sendOnRollupOnExit } from "../chain/transport";
 import { LIVE_TIMING } from "./chain-rules";
+import type { PreparedLeave } from "../chain/player";
 import { type ActionSigner, type CashOutReceipt, createGuestPlayChain } from "./guest-chain";
 import type { GuestStage } from "./guest-steps";
 import type { RecordedRound } from "./round-events";
@@ -127,6 +128,7 @@ export type GuestSeat = {
   client: ChainClient;
   tableSnapshot: TableSnapshot;
   cashOut: () => Promise<Result<CashOutReceipt>>;
+  prepareLeave: () => Promise<Result<PreparedLeave>>;
   close: () => void;
 };
 
@@ -158,7 +160,7 @@ export async function seatGuest(setup: GuestSeatSetup): Promise<Result<GuestSeat
     player.stop();
     stopFeed();
   };
-  return success({ store, player, guest: wallet.publicKey, client, tableSnapshot: tableSnapshot.value, cashOut: play.cashOut, close });
+  return success({ store, player, guest: wallet.publicKey, client, tableSnapshot: tableSnapshot.value, cashOut: play.cashOut, prepareLeave: play.prepareLeave, close });
 }
 
 export type LivePlay = {
@@ -184,10 +186,34 @@ export type LivePlaySetup = {
   startCompanions: ((seat: CompanionSeat) => () => void) | null;
 };
 
+const EXIT_LEAVE_REFRESH_MS = 5_000;
+
+function armLeaveOnExit(client: ChainClient, prepareLeave: () => Promise<Result<PreparedLeave>>): () => void {
+  let prepared: PreparedLeave | null = null;
+  const refresh = async () => {
+    const next = await prepareLeave();
+    if (next.ok) prepared = next.value;
+    else console.warn(`[armLeaveOnExit] ${next.reason}`);
+  };
+  const leaveOnExit = () => {
+    if (prepared !== null) sendOnRollupOnExit(client.rollupUrl, client.rollupBlockhashes, prepared.instructions, prepared.signer);
+  };
+  void refresh();
+  const refreshTimer = setInterval(() => void refresh(), EXIT_LEAVE_REFRESH_MS);
+  window.addEventListener("pagehide", leaveOnExit);
+  return () => {
+    clearInterval(refreshTimer);
+    window.removeEventListener("pagehide", leaveOnExit);
+  };
+}
+
 export async function openLivePlay(setup: LivePlaySetup): Promise<Result<LivePlay>> {
   const feePayment = await createSponsoredFeePayment(SPONSOR_ROUTE_PATH);
   if (!feePayment.ok) return failure(`[openLivePlay] ${feePayment.reason}`);
   const feed = createAccountFeed({ rpcUrl: ROLLUP_RPC_URL, wsUrl: ROLLUP_WS_URL });
+  let disarmLeave: (() => void) | null = null;
+  let armOnReady: (() => void) | null = null;
+  let isReady = false;
   const seated = await seatGuest({
     table: setup.table,
     feePayment: feePayment.value,
@@ -198,14 +224,26 @@ export async function openLivePlay(setup: LivePlaySetup): Promise<Result<LivePla
     buyInChips: setup.buyInChips,
     isCranking: true,
     antePolicy: setup.antePolicy,
-    onStage: setup.onStage,
+    onStage: (stage) => {
+      if (stage.kind === "ready") {
+        isReady = true;
+        armOnReady?.();
+      }
+      setup.onStage(stage);
+    },
   });
   if (!seated.ok) {
     feed.close();
     return seated;
   }
+  const seat = seated.value;
+  armOnReady = () => {
+    disarmLeave ??= armLeaveOnExit(seat.client, seat.prepareLeave);
+  };
+  if (isReady) armOnReady();
   const stopCompanions = setup.startCompanions?.({ table: setup.table, feed, keyStore: setup.keyStore, guest: seated.value.guest }) ?? (() => undefined);
   const close = () => {
+    disarmLeave?.();
     stopCompanions();
     seated.value.close();
     feed.close();

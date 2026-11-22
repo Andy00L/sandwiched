@@ -1,5 +1,5 @@
 import { isMagicAtaTokenAccount, withdrawSpl } from "@magicblock-labs/ephemeral-rollups-sdk";
-import type { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import type { Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { findSeatAddress, findWalletTokenAddress } from "./addresses";
 import type { ChainClient } from "./client";
 import {
@@ -107,7 +107,10 @@ export type SeatActions = {
   landSwat: (seats: PublicKey[]) => Promise<RollupAck>;
   settle: (seats: PublicKey[]) => Promise<RollupAck>;
   evictSeat: (wallet: PublicKey, paysOut: boolean) => Promise<RollupAck>;
+  prepareLeave: (chips: bigint) => Promise<Result<PreparedLeave>>;
 };
+
+export type PreparedLeave = { instructions: TransactionInstruction[]; signer: Keypair };
 
 export type SeatActionsSetup = {
   client: ChainClient;
@@ -156,5 +159,16 @@ export const createSeatActions = ({ client, table, mint, wallet, sessions }: Sea
     landSwat: (seats) => sendAsSession(() => buildLandSwatInstruction(program, table, seats)),
     settle: (seats) => sendAsSession(() => buildSettleInstruction(program, table, seats)),
     evictSeat: (seatWallet, paysOut) => sendAsSession(() => buildEvictSeatInstruction(program, table, mint, seatWallet, paysOut)),
+    prepareLeave: async (chips) => {
+      if (sessions === null) return failure("[prepareLeave] only a session-signed seat leaves on exit");
+      const session = await sessions.resolve();
+      if (!session.ok) return failure(`[prepareLeave] ${session.reason}`);
+      const actor: SeatActor = { ...walletActor, signer: session.value.signer.publicKey, sessionToken: session.value.token };
+      const instructions = await attempt(async () => [
+        ...(chips > 0n ? [await buildCashOutInstruction(program, actor, mint, chips)] : []),
+        await buildLeaveInstruction(program, actor),
+      ]);
+      return instructions.ok ? success({ instructions: instructions.value, signer: session.value.signer }) : failure(`[prepareLeave] ${instructions.reason}`);
+    },
   };
 };
