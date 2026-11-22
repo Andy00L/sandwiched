@@ -185,8 +185,8 @@ export const createDepositQueue = ({ chain, owner, store, readNowMs = Date.now }
     return run;
   };
 
-  const waitForLanding = (shuttleId: number) => {
-    let hasSeenInFlight = false;
+  const waitForLanding = (shuttleId: number, hasConfirmedOnBase: boolean) => {
+    let hasSeenInFlight = hasConfirmedOnBase;
     return pollUntil(
       "deposit on the rollup",
       async () => {
@@ -222,7 +222,7 @@ export const createDepositQueue = ({ chain, owner, store, readNowMs = Date.now }
       reportLedgerFailure(ledger.settle(current));
       return failure(`[runDeposit] the deposit failed on base and moved nothing: ${confirmed.reason}`);
     }
-    const landed = await waitForLanding(intent.value.shuttleId);
+    const landed = await waitForLanding(intent.value.shuttleId, confirmed.ok);
     if (!landed.ok) {
       reportLedgerFailure(ledger.markStranded(current, landed.reason));
       return success({ state: "pending", signature, shuttleId: intent.value.shuttleId });

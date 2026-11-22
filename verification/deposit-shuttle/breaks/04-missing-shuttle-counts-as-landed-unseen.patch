@@ -3,8 +3,8 @@
 @@ -186,7 +186,7 @@
    };
  
-   const waitForLanding = (shuttleId: number) => {
--    let hasSeenInFlight = false;
+   const waitForLanding = (shuttleId: number, hasConfirmedOnBase: boolean) => {
+-    let hasSeenInFlight = hasConfirmedOnBase;
 +    let hasSeenInFlight = true;
      return pollUntil(
        "deposit on the rollup",

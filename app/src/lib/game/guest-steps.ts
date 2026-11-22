@@ -23,14 +23,19 @@ export type GuestChain = {
   run: (step: GuestStep) => Promise<Result<string>>;
 };
 
-export function chooseGuestStep(facts: GuestFacts, needs: GuestNeeds): GuestStep | "ready" {
-  if (!facts.isSeatOnRollup) return "sit";
-  if (!facts.hasSession) return "session";
-  if (facts.seatIndex === null) return "join";
-  if (facts.chips >= needs.chipsToPlay) return "ready";
-  if (facts.rollupUnits >= needs.unitsPerBuyIn) return "buyIn";
-  if (facts.walletUnits >= needs.unitsPerBuyIn) return "deposit";
-  return "fund";
+export type GuestLane = "seat" | "money";
+
+export function chooseLaneStep(lane: GuestLane, facts: GuestFacts, needs: GuestNeeds): GuestStep | "done" | "waiting" {
+  switch (lane) {
+    case "seat":
+      if (!facts.isSeatOnRollup) return "sit";
+      if (!facts.hasSession) return "session";
+      return facts.seatIndex === null ? "join" : "done";
+    case "money":
+      if (facts.isSeatOnRollup && facts.chips >= needs.chipsToPlay) return "done";
+      if (facts.rollupUnits >= needs.unitsPerBuyIn) return facts.isSeatOnRollup ? "buyIn" : "waiting";
+      return facts.walletUnits >= needs.unitsPerBuyIn ? "deposit" : "fund";
+  }
 }
 
 export type GuestLoopOptions = {
@@ -43,31 +48,46 @@ export type GuestLoopOptions = {
   isStopped: () => boolean;
 };
 
-export async function prepareGuest(chain: GuestChain, options: GuestLoopOptions): Promise<GuestStage> {
+const FIRST_LANE_STEP: Record<GuestLane, GuestStep> = { seat: "sit", money: "fund" };
+
+type LaneEnd = { kind: "done" } | { kind: "stopped" } | { kind: "failed"; step: GuestStep; reason: string };
+
+async function runLane(chain: GuestChain, lane: GuestLane, options: GuestLoopOptions): Promise<LaneEnd> {
   let lastStep: GuestStep | null = null;
   let attempt = 0;
   for (;;) {
-    if (options.isStopped()) return { kind: "failed", step: lastStep ?? "sit", reason: "stopped" };
+    if (options.isStopped()) return { kind: "stopped" };
     const facts = await chain.readFacts();
-    const step: GuestStep | "ready" = facts.ok ? chooseGuestStep(facts.value, options.needs) : (lastStep ?? "sit");
-    if (step === "ready") {
-      options.onStage({ kind: "ready" });
-      return { kind: "ready" };
+    const step: GuestStep | "done" | "waiting" = facts.ok ? chooseLaneStep(lane, facts.value, options.needs) : (lastStep ?? FIRST_LANE_STEP[lane]);
+    if (step === "done") return { kind: "done" };
+    if (step === "waiting") {
+      await options.wait(options.settleDelayMs);
+      continue;
     }
     attempt = step === lastStep ? attempt + 1 : 1;
     lastStep = step;
-    if (attempt > options.maxAttemptsPerStep) {
-      const failed: GuestStage = { kind: "failed", step, reason: facts.ok ? `${step} did not take effect` : facts.reason };
-      options.onStage(failed);
-      return failed;
-    }
+    if (attempt > options.maxAttemptsPerStep) return { kind: "failed", step, reason: facts.ok ? `${step} did not take effect` : facts.reason };
     options.onStage({ kind: "preparing", step, attempt });
     const ran = facts.ok ? await chain.run(step) : facts;
     if (ran.ok) {
       await options.wait(options.settleDelayMs);
       continue;
     }
-    console.warn(`[prepareGuest] ${step} attempt ${attempt}: ${ran.reason}`);
+    console.warn(`[runLane] ${step} attempt ${attempt}: ${ran.reason}`);
     await options.wait(options.retryDelayMs * attempt);
   }
+}
+
+export async function prepareGuest(chain: GuestChain, options: GuestLoopOptions): Promise<GuestStage> {
+  let failed: GuestStage | null = null;
+  const laneOptions: GuestLoopOptions = { ...options, isStopped: () => options.isStopped() || failed !== null };
+  const runUntilFailed = async (lane: GuestLane) => {
+    const end = await runLane(chain, lane, laneOptions);
+    if (end.kind === "failed" && failed === null) failed = { kind: "failed", step: end.step, reason: end.reason };
+    return end;
+  };
+  const ends = await Promise.all([runUntilFailed("seat"), runUntilFailed("money")]);
+  const outcome: GuestStage = failed ?? (ends.every((end) => end.kind === "done") ? { kind: "ready" } : { kind: "failed", step: "sit", reason: "stopped" });
+  options.onStage(outcome);
+  return outcome;
 }
