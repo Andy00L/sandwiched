@@ -51,6 +51,21 @@ FORMATS = {
 }
 
 
+def accepted_clip(root, clip):
+    """A clip listed in <project>/accepted-clips.json, within its maxDepth, before its until date and approved by a
+    human, does not fail the run: [{"a", "b", "maxDepth", "reason", "until": "YYYY-MM-DD", "approvedBy"}]."""
+    path = os.path.join(root, 'accepted-clips.json')
+    if not os.path.exists(path): return False
+    import datetime
+    today = datetime.date.today().isoformat()
+    for entry in json.load(open(path)):
+        if {entry['a'], entry['b']} != {clip['a'], clip['b']} or clip['depth'] > entry['maxDepth']: continue
+        if not entry.get('approvedBy'): print(f'  hero: {clip["a"]} / {clip["b"]} is listed in accepted-clips.json but not approved by a human'); return False
+        if entry['until'] < today: print(f'  hero: the accepted clip {clip["a"]} / {clip["b"]} expired on {entry["until"]}'); return False
+        return True
+    return False
+
+
 def parse_size(s):
     s = s.strip().lower()
     if s in FORMATS:
@@ -193,6 +208,9 @@ def main():
                     for e in s['top']: print(f'    {e["ms"]:6d} ms  {e["prints"]:4d} x {e["each"]:6.1f} ms  {e["at"]}')
                 cl = pg.evaluate('__papercraft.clips ? __papercraft.clips() : null')
                 if cl is not None:   # the hero's cards, standing and through his stride (references/mechanisms.md 12)
+                    accepted = [c for c in cl if accepted_clip(root, c)]
+                    cl = [c for c in cl if c not in accepted]
+                    for c in accepted: print(f'  hero: accepted {c["a"]} / {c["b"]}: {c["kind"]} by {c["depth"]} (accepted-clips.json)')
                     print(f'  hero: {len(cl)} card pair(s) cut into each other' if cl else '  hero: no card cuts into another, standing or walking')
                     for c in cl[:12]: print(f'    {c["a"]} / {c["b"]}: {c["kind"]} by {c["depth"]} ({c["at"]})')
                     if cl: failed = True
