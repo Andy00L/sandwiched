@@ -57,8 +57,8 @@ function paintJuice(print: Print): void {
   print.felt(0.6);
 }
 
-export function crumbOutline(random: () => number): Point[] {
-  const size = 0.38 + random() * 0.22;
+export function crumbOutline(random: () => number, sizeFactor = 1): Point[] {
+  const size = (0.38 + random() * 0.22) * sizeFactor;
   return [
     [-size, 0],
     [size * 0.9, 0],

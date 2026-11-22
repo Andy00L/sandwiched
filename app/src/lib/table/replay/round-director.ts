@@ -1,4 +1,4 @@
-import type { HandRaisedEvent, RecordedRound, RoundEvent } from "../../game/round-events";
+import type { RecordedRound, RoundEvent } from "../../game/round-events";
 import { applyRoundEvent, createViewState } from "../../game/view-state";
 import type { RoundViewState } from "../../game/view-state";
 
@@ -23,12 +23,12 @@ interface RoundDirector {
   view(): RoundViewState;
   advanceTo(tick: number): readonly RoundEvent[];
   poseOf(seat: number, tick: number): SeatPose;
-  latestRaises(): readonly HandRaisedEvent[];
   reset(): void;
 }
 
 const AWAY: SeatStage = { kind: "away" };
 const HOVERING: SeatStage = { kind: "hovering" };
+const HIDDEN: SeatPose = { kind: "hidden" };
 
 function stagePerch(stage: SeatStage): PerchSlot | null {
   if (stage.kind === "perched" || stage.kind === "stunned") return stage.at;
@@ -39,9 +39,9 @@ function stagePerch(stage: SeatStage): PerchSlot | null {
 function resolvePose(stage: SeatStage, tick: number): SeatPose {
   switch (stage.kind) {
     case "away":
-      return { kind: "hidden" };
+      return HIDDEN;
     case "drawn":
-      return tick - stage.sinceTick < DRAWN_FOLD_TICKS ? stage : { kind: "hidden" };
+      return tick - stage.sinceTick < DRAWN_FOLD_TICKS ? stage : HIDDEN;
     case "flying":
       return stage.to === "hover" && tick >= stage.landsTick ? { kind: "hovering" } : stage;
     default:
@@ -54,7 +54,6 @@ export function createRoundDirector(round: RecordedRound): RoundDirector {
   let cursor = 0;
   const stages = new Map<number, SeatStage>();
   const occupants = new Map<number, Array<number | null>>();
-  const raisesByBox = new Map<number, HandRaisedEvent>();
 
   function releasePerch(seat: number): void {
     const perch = stagePerch(stages.get(seat) ?? AWAY);
@@ -110,9 +109,6 @@ export function createRoundDirector(round: RecordedRound): RoundDirector {
       case "pecked":
         if (event.outcome === "emptyBox") stunAt(event.seat, "bonk", event.tick, event.untilTick);
         return;
-      case "handRaised":
-        raisesByBox.set(event.box, event);
-        return;
       case "swatLanded":
         for (const hit of event.hits) stunAt(hit.seat, "swat", event.tick, hit.untilTick);
         return;
@@ -122,6 +118,7 @@ export function createRoundDirector(round: RecordedRound): RoundDirector {
         return;
       }
       case "anted":
+      case "handRaised":
       case "settled":
         return;
     }
@@ -141,13 +138,11 @@ export function createRoundDirector(round: RecordedRound): RoundDirector {
       return applied;
     },
     poseOf: (seat, tick) => resolvePose(stages.get(seat) ?? AWAY, tick),
-    latestRaises: () => [...raisesByBox.values()],
     reset() {
       view = createViewState(round);
       cursor = 0;
       stages.clear();
       occupants.clear();
-      raisesByBox.clear();
     },
   };
 }

@@ -145,6 +145,9 @@ export interface Harness {
   setHero(handle: PlacedPiece, options?: { turn?: "yaw" | "flip" }): void;
   start(): void;
   setRenderScale(scale: number): void;
+  focusOn(point: THREE.Vector3 | null): void;
+  castShadowOnly(object: THREE.Object3D): void;
+  keyLight: THREE.DirectionalLight | null;
 }
 
 export function createHarness(options?: HarnessOptions): Harness;

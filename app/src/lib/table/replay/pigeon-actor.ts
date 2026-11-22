@@ -3,9 +3,9 @@ import type { Harness, PlacedPiece } from "papercraft/harness.js";
 import { FlapSpring, hinge, makeCard } from "papercraft/lib/paperkit-3d.js";
 import type { HingeHandle } from "papercraft/lib/paperkit-3d.js";
 import { cropBagStageFor, printPigeonKit } from "../pieces/pigeon";
-import type { CropBagPrints, PigeonKit, PigeonPartPrint, PigeonVariant } from "../pieces/pigeon";
-import { buildPigeonPuppet } from "../pieces/pigeon-puppet";
-import { BONK_TILT_RAD, FLATTEN_MS, FLINCH_MS, HOVER_BOB_HZ, HOVER_BOB_UNITS, HOVER_HEIGHT_UNITS } from "../motion/motion-tokens";
+import type { CropBagPrints, PigeonKit, PigeonPartPrint, PigeonVariant, PressedProps } from "../pieces/pigeon";
+import { attachPressedProps, buildPigeonPuppet } from "../pieces/pigeon-puppet";
+import { BONK_TILT_RAD, CREASE_MS, FLATTEN_MS, FLINCH_MS, HOVER_BOB_HZ, HOVER_BOB_UNITS, HOVER_HEIGHT_UNITS } from "../motion/motion-tokens";
 import { flightPlacement, peckDepth } from "../motion/pigeon-clips";
 import { applyFlip, stepFlip } from "../motion/verbs";
 import type { FlipTarget } from "../motion/verbs";
@@ -20,10 +20,14 @@ const BODY_PECK_RAD = 0.12;
 const WING_FLAP_RAD = THREE.MathUtils.degToRad(32);
 const WING_FLAP_HZ = 9;
 const FLINCH_WING_RAD = THREE.MathUtils.degToRad(20);
+const APPEAR_SPRING_SIZE = 0.3;
+const SWAT_WHIP_SPRING_SIZE = 0.47;
+const HIDDEN_BELOW_OPEN = 0.02;
+const FOLDED_LIFT_UNITS = 0.32;
 const STAR_SPOTS: ReadonlyArray<readonly [number, number]> = [
-  [-1.5, 0.9],
-  [0.1, 1.8],
-  [1.6, 0.7],
+  [-2.9, 2.9],
+  [0.1, 0.4],
+  [2.9, 2.6],
 ];
 
 export type PigeonPose =
@@ -59,12 +63,13 @@ function flipTarget(facing: Facing): FlipTarget {
 export function createPigeonActor(
   harness: Harness,
   deck: THREE.Object3D,
-  prints: { kit: PigeonKit; cropBags: CropBagPrints; star: PigeonPartPrint },
+  prints: { kit: PigeonKit; cropBags: CropBagPrints; star: PigeonPartPrint; pressed: PressedProps },
   seat: number,
   order: number,
 ): PigeonActor {
   const cardOptions = harness.cardOpts(0, 0, 1, deck);
   const puppet = buildPigeonPuppet(prints.kit, prints.cropBags, cardOptions, `pigeon seat ${seat}`);
+  const { tongue, crease } = attachPressedProps(puppet, prints.kit, prints.pressed, cardOptions, `pigeon seat ${seat}`);
   const turnPivot = new THREE.Group();
   const tiltPivot = new THREE.Group();
   const foldPivot = new THREE.Group();
@@ -75,7 +80,9 @@ export function createPigeonActor(
 
   let flip = 1;
   turnPivot.rotation.y = -TABLE_YAW_RAD;
-  const riseSpring = new FlapSpring({ p: 1, size: 0.3 });
+  const appearSpring = new FlapSpring({ p: 1, size: APPEAR_SPRING_SIZE });
+  const swatWhipSpring = new FlapSpring({ p: 1, size: SWAT_WHIP_SPRING_SIZE });
+  let riseSpring = appearSpring;
   const bonkSpring = new FlapSpring({ p: 1, size: 0.3 });
   const stars: HingeHandle[] = STAR_SPOTS.map(([starX, starZ], starIndex) => {
     const card = makeCard(prints.star.outline, { ...cardOptions, materials: prints.star.materials });
@@ -88,19 +95,33 @@ export function createPigeonActor(
   const starTargets = stars.map(() => 0);
   let lastPeckTick = Number.NEGATIVE_INFINITY;
   let lastFlinchTick = Number.NEGATIVE_INFINITY;
+  let creaseUntilTick = Number.NEGATIVE_INFINITY;
+  let isCreaseWorn = false;
 
   function updateStars(pose: PigeonPose, nowTick: number, tickMs: number, dtSeconds: number): void {
     const stunElapsedMs = pose.kind === "stunned" ? (nowTick - pose.sinceTick) * tickMs : -1;
     const foldEveryMs = pose.kind === "stunned" ? ((pose.untilTick - pose.sinceTick) * tickMs) / stars.length : 0;
-    stars.forEach((star, starIndex) => {
+    for (let starIndex = 0; starIndex < stars.length; starIndex++) {
+      const star = stars[starIndex];
+      if (!star) continue;
       const target = stunElapsedMs >= 0 && stunElapsedMs < foldEveryMs * (stars.length - starIndex) ? 1 : 0;
       if (target !== starTargets[starIndex]) {
         starTargets[starIndex] = target;
         star.set(target, 0);
       }
       star.update(dtSeconds);
-      star.group.visible = target === 1 || star.p > 0.02;
-    });
+      star.group.visible = target === 1 || star.p > HIDDEN_BELOW_OPEN;
+    }
+  }
+
+  function updateCrease(nowTick: number, dtSeconds: number): void {
+    const isWorn = nowTick < creaseUntilTick;
+    if (isWorn !== isCreaseWorn) {
+      isCreaseWorn = isWorn;
+      crease.set(isWorn ? 1 : 0, 0);
+    }
+    crease.update(dtSeconds);
+    crease.group.visible = isWorn || crease.p > HIDDEN_BELOW_OPEN;
   }
   let wasStunnedBy: "bonk" | "swat" | null = null;
   let wasHidden = true;
@@ -109,12 +130,18 @@ export function createPigeonActor(
     piece.group.position.set(along, 0.01 + height, deckZ);
   }
 
+  function liftOffDeckWhileFolded(): void {
+    piece.group.position.y += Math.min(1, Math.abs(foldPivot.rotation.x) / FLAT_RAD) * FOLDED_LIFT_UNITS;
+  }
+
   function applyStun(pose: Extract<PigeonPose, { kind: "stunned" }>, nowTick: number, tickMs: number, dtSeconds: number): void {
     const elapsedMs = (nowTick - pose.sinceTick) * tickMs;
     if (pose.cause === "swat") {
       const flatness = smoothstep(elapsedMs / FLATTEN_MS);
       foldPivot.rotation.x = flatness * FLAT_RAD;
-      riseSpring.reset(0);
+      swatWhipSpring.reset(0);
+      riseSpring = swatWhipSpring;
+      tongue.visible = true;
     } else {
       if (wasStunnedBy !== "bonk") bonkSpring.set(0);
       tiltPivot.rotation.z = (1 - bonkSpring.step(dtSeconds)) * BONK_TILT_RAD;
@@ -122,8 +149,14 @@ export function createPigeonActor(
     wasStunnedBy = pose.cause;
   }
 
-  function settleAfterStun(dtSeconds: number): void {
-    if (wasStunnedBy === "swat") riseSpring.set(1);
+  function settleAfterStun(nowTick: number, tickMs: number, dtSeconds: number): void {
+    if (wasStunnedBy === "swat") {
+      riseSpring.set(1);
+      tongue.visible = false;
+      crease.reset(1);
+      isCreaseWorn = true;
+      creaseUntilTick = nowTick + CREASE_MS / tickMs;
+    }
     if (wasStunnedBy === "bonk") bonkSpring.set(1);
     wasStunnedBy = null;
     foldPivot.rotation.x = (1 - riseSpring.step(dtSeconds)) * FLAT_RAD;
@@ -144,6 +177,11 @@ export function createPigeonActor(
     reset() {
       lastPeckTick = Number.NEGATIVE_INFINITY;
       lastFlinchTick = Number.NEGATIVE_INFINITY;
+      creaseUntilTick = Number.NEGATIVE_INFINITY;
+      isCreaseWorn = false;
+      crease.reset(0);
+      crease.group.visible = false;
+      tongue.visible = false;
       for (const star of stars) {
         star.reset(0);
         star.group.visible = false;
@@ -151,7 +189,9 @@ export function createPigeonActor(
       starTargets.fill(0);
       wasStunnedBy = null;
       wasHidden = true;
-      riseSpring.reset(1);
+      appearSpring.reset(1);
+      swatWhipSpring.reset(1);
+      riseSpring = appearSpring;
       bonkSpring.reset(1);
       flip = 1;
       applyFlip(turnPivot, flip);
@@ -171,10 +211,12 @@ export function createPigeonActor(
       }
       if (wasHidden) {
         wasHidden = false;
-        riseSpring.reset(0);
-        riseSpring.set(1);
+        appearSpring.reset(0);
+        appearSpring.set(1);
+        riseSpring = appearSpring;
       }
       updateStars(pose, nowTick, tickMs, dtSeconds);
+      updateCrease(nowTick, dtSeconds);
       let facing: Facing = "right";
       if (pose.kind === "flying") {
         const placement = flightPlacement(pose.from, pose.to, pose, { startTick: pose.startTick, landsTick: pose.landsTick, nowTick });
@@ -182,7 +224,8 @@ export function createPigeonActor(
         facing = pose.to.along >= pose.from.along ? "right" : "left";
       } else if (pose.kind === "folding") {
         placeAt(pose.spot.along, HOVER_HEIGHT_UNITS, pose.spot.deckZ);
-        foldPivot.rotation.x = smoothstep(((nowTick - pose.sinceTick) * tickMs) / FOLD_AWAY_MS) * FLAT_RAD;
+        foldPivot.rotation.x = -smoothstep(((nowTick - pose.sinceTick) * tickMs) / FOLD_AWAY_MS) * FLAT_RAD;
+        liftOffDeckWhileFolded();
         return;
       } else if (pose.kind === "hovering") {
         const bob = Math.sin(((nowTick * tickMs) / 1000) * Math.PI * 2 * HOVER_BOB_HZ + pose.spot.along) * HOVER_BOB_UNITS;
@@ -196,9 +239,11 @@ export function createPigeonActor(
       applyFlip(turnPivot, flip);
       if (pose.kind === "stunned") {
         applyStun(pose, nowTick, tickMs, dtSeconds);
+        liftOffDeckWhileFolded();
         return;
       }
-      settleAfterStun(dtSeconds);
+      settleAfterStun(nowTick, tickMs, dtSeconds);
+      liftOffDeckWhileFolded();
       const isAirborne = pose.kind === "flying" || pose.kind === "hovering";
       const flap = isAirborne ? Math.sin(((nowTick * tickMs) / 1000) * Math.PI * 2 * WING_FLAP_HZ + seat) * WING_FLAP_RAD : 0;
       const flinch = pose.kind === "perched" && (nowTick - lastFlinchTick) * tickMs < FLINCH_MS ? -FLINCH_WING_RAD : 0;

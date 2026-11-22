@@ -16,9 +16,16 @@ export const FLINCH_MS = 120;
 export const SWAT_STAR_FOLD_MS = 500;
 
 export const SLAM_RAISE_MS = 180;
+const SLAM_HOLD_AT_TOP_MS = 110;
 export const SLAM_DOWN_MS = 60;
 export const SLAM_HOLD_MS = 150;
 export const SLAM_LIFT_MS = 250;
+
+export const FOCUS_PULL_MS = SLAM_HOLD_AT_TOP_MS;
+export const FOCUS_RETURN_MS = 600;
+
+export const FEATHER_DRIFT_MS = 1200;
+export const CREASE_MS = 2000;
 
 export const FLIGHT_ARC_HEIGHT_UNITS = 0.9 * PIGEON_HEIGHT_UNITS;
 export const HOVER_HEIGHT_UNITS = 0.9 * PIGEON_HEIGHT_UNITS;

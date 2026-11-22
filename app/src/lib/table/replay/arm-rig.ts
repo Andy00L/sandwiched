@@ -12,31 +12,41 @@ export interface ArmRig {
   side: -1 | 1;
 }
 
-function orientAlong(direction: THREE.Vector3, towardCamera: THREE.Vector3): THREE.Quaternion {
-  const cardUp = direction.clone().negate().normalize();
-  const cardNormal = towardCamera.clone().addScaledVector(cardUp, -towardCamera.dot(cardUp)).normalize();
-  const cardRight = new THREE.Vector3().crossVectors(cardUp, cardNormal).normalize();
-  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(cardRight, cardUp, cardNormal));
-}
+const ELBOW_POLES: Record<-1 | 1, THREE.Vector3> = {
+  [-1]: new THREE.Vector3(-1, -0.3, -0.8).normalize(),
+  [1]: new THREE.Vector3(1, -0.3, -0.8).normalize(),
+};
+const scratchToHand = new THREE.Vector3();
+const scratchPoleAcross = new THREE.Vector3();
+const scratchElbow = new THREE.Vector3();
+const scratchReachedHand = new THREE.Vector3();
+const scratchSegment = new THREE.Vector3();
+const scratchCardUp = new THREE.Vector3();
+const scratchCardNormal = new THREE.Vector3();
+const scratchCardRight = new THREE.Vector3();
+const scratchBasis = new THREE.Matrix4();
 
-function elbowPole(side: -1 | 1): THREE.Vector3 {
-  return new THREE.Vector3(side, -0.3, -0.8).normalize();
+function orientAlong(target: THREE.Quaternion, direction: THREE.Vector3, towardCamera: THREE.Vector3): void {
+  const cardUp = scratchCardUp.copy(direction).negate().normalize();
+  const cardNormal = scratchCardNormal.copy(towardCamera).addScaledVector(cardUp, -towardCamera.dot(cardUp)).normalize();
+  const cardRight = scratchCardRight.crossVectors(cardUp, cardNormal).normalize();
+  target.setFromRotationMatrix(scratchBasis.makeBasis(cardRight, cardUp, cardNormal));
 }
 
 export function poseArm(rig: ArmRig, hand: THREE.Vector3, towardCamera: THREE.Vector3): void {
-  const toHand = hand.clone().sub(rig.shoulder);
+  const toHand = scratchToHand.subVectors(hand, rig.shoulder);
   const minimumReach = Math.abs(UPPER_ARM_UNITS - FOREARM_UNITS) + REACH_MARGIN_UNITS;
   const maximumReach = UPPER_ARM_UNITS + FOREARM_UNITS - REACH_MARGIN_UNITS;
   const reach = Math.min(maximumReach, Math.max(minimumReach, toHand.length()));
   const direction = toHand.normalize();
   const alongReach = (UPPER_ARM_UNITS * UPPER_ARM_UNITS + reach * reach - FOREARM_UNITS * FOREARM_UNITS) / (2 * reach);
   const elbowLift = Math.sqrt(Math.max(0, UPPER_ARM_UNITS * UPPER_ARM_UNITS - alongReach * alongReach));
-  const pole = elbowPole(rig.side);
-  const poleAcross = pole.addScaledVector(direction, -pole.dot(direction)).normalize();
-  const elbow = rig.shoulder.clone().addScaledVector(direction, alongReach).addScaledVector(poleAcross, elbowLift);
-  const reachedHand = rig.shoulder.clone().addScaledVector(direction, reach);
+  const pole = ELBOW_POLES[rig.side];
+  const poleAcross = scratchPoleAcross.copy(pole).addScaledVector(direction, -pole.dot(direction)).normalize();
+  const elbow = scratchElbow.copy(rig.shoulder).addScaledVector(direction, alongReach).addScaledVector(poleAcross, elbowLift);
+  const reachedHand = scratchReachedHand.copy(rig.shoulder).addScaledVector(direction, reach);
   rig.upper.position.copy(rig.shoulder);
-  rig.upper.quaternion.copy(orientAlong(elbow.clone().sub(rig.shoulder), towardCamera));
+  orientAlong(rig.upper.quaternion, scratchSegment.subVectors(elbow, rig.shoulder), towardCamera);
   rig.fore.position.copy(elbow).addScaledVector(towardCamera, FOREARM_LAYER_UNITS);
-  rig.fore.quaternion.copy(orientAlong(reachedHand.sub(elbow), towardCamera));
+  orientAlong(rig.fore.quaternion, scratchSegment.subVectors(reachedHand, elbow), towardCamera);
 }

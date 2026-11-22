@@ -53,7 +53,7 @@ import { recordFrameTimes } from "./stage/frame-recorder";
 import { buildParkLife } from "./stage/park-life";
 import { printParkGround } from "./stage/park-ground";
 import { probeQualityTier, storedRenderScale } from "./stage/quality-probe";
-import { PAPER_STOCK, PARK_LENS, PARK_LIGHT, PARK_TEST_VIEW, PARK_VIEW, TABLE_YAW_RAD, TEST_CARD_SPOT } from "./stage/look";
+import { PAPER_STOCK, PARK_LENS, PARK_LIGHT, PARK_TEST_VIEW, PARK_VIEW, SCENE_FOCUS, TABLE_YAW_RAD, TEST_CARD_SPOT } from "./stage/look";
 
 type SceneMode = { kind: "sample" } | { kind: "replay"; round: RecordedRound };
 
@@ -173,7 +173,7 @@ export async function buildTableScene(): Promise<void> {
     testView: PARK_TEST_VIEW,
     light: PARK_LIGHT,
     lens: PARK_LENS,
-    focus: [1.5, 8, -7],
+    focus: SCENE_FOCUS,
     renderScale: storedRenderScale(),
   });
   harness.printGround((tools) => printParkGround(tools, harness.bounds));

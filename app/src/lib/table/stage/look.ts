@@ -41,6 +41,8 @@ export const PARK_LENS: LensOptions = {
 
 export const TABLE_YAW_RAD = (26 * Math.PI) / 180;
 
+export const SCENE_FOCUS: Vector3Tuple = [1.5, 8, -7];
+
 export const PARK_VIEW: NonNullable<HarnessOptions["view"]> = {
   fov: 26,
   pitch: 47,

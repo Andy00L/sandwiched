@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { HIT_STOP_BASE_MS, HIT_STOP_MAX_MS, HIT_STOP_PER_HIT_MS, RIPPLE_S_PER_UNIT } from "./motion-tokens";
+import { FOCUS_PULL_MS, FOCUS_RETURN_MS, HIT_STOP_BASE_MS, HIT_STOP_MAX_MS, HIT_STOP_PER_HIT_MS, RIPPLE_S_PER_UNIT, SLAM_DOWN_MS, SLAM_HOLD_MS, SLAM_LIFT_MS, SLAM_RAISE_MS } from "./motion-tokens";
 import { PIGEON_HEIGHT_UNITS } from "../stage/look";
 
 export const HIT_STOP_CATCH_UP_MS = 150;
@@ -24,6 +24,11 @@ const SHAKE_RAD = DEGREES(10);
 const SHAKE_CYCLES = 3;
 const LID_POP_MS = 180;
 const LID_POP_AMOUNT = 0.1;
+const FLIPPER_BACK_AT_REST_MS = SLAM_HOLD_MS + SLAM_LIFT_MS;
+const SHADOW_APPEAR_HEIGHT_UNITS = 6;
+const SHADOW_HOLD_HEIGHT_UNITS = 3.2;
+const SHADOW_DARK_HEIGHT_UNITS = 1.6;
+const SHADOW_CONTACT_HEIGHT_UNITS = 0.35;
 
 export interface Landing {
   tick: number;
@@ -90,4 +95,32 @@ export function flipperShakeRad(msFromLanding: number): number {
 export function lidPopAmount(msFromImpact: number): number {
   if (msFromImpact < 0 || msFromImpact >= LID_POP_MS) return 0;
   return LID_POP_AMOUNT * Math.sin((msFromImpact / LID_POP_MS) * Math.PI);
+}
+
+export function focusPullAmount(msFromLanding: number, windupMs: number, holdAfterLandingMs: number): number {
+  const sinceRaise = msFromLanding + windupMs;
+  const releaseMs = Math.max(FLIPPER_BACK_AT_REST_MS, holdAfterLandingMs);
+  if (sinceRaise < SLAM_RAISE_MS) return 0;
+  if (msFromLanding < releaseMs) return smoothstep((sinceRaise - SLAM_RAISE_MS) / FOCUS_PULL_MS);
+  return 1 - smoothstep((msFromLanding - releaseMs) / FOCUS_RETURN_MS);
+}
+
+export function isFlipperShadowShown(msFromLanding: number, windupMs: number): boolean {
+  return msFromLanding >= -windupMs && msFromLanding < FLIPPER_BACK_AT_REST_MS;
+}
+
+function lerp(from: number, to: number, progress: number): number {
+  return from + (to - from) * Math.min(1, Math.max(0, progress));
+}
+
+export function flipperShadowHeightUnits(msFromLanding: number, windupMs: number): number {
+  const sinceRaise = msFromLanding + windupMs;
+  if (sinceRaise < SLAM_RAISE_MS) return lerp(SHADOW_APPEAR_HEIGHT_UNITS, SHADOW_HOLD_HEIGHT_UNITS, smoothstep(sinceRaise / SLAM_RAISE_MS));
+  if (msFromLanding < -SLAM_DOWN_MS) return lerp(SHADOW_HOLD_HEIGHT_UNITS, SHADOW_DARK_HEIGHT_UNITS, (sinceRaise - SLAM_RAISE_MS) / Math.max(1, windupMs - SLAM_RAISE_MS - SLAM_DOWN_MS));
+  if (msFromLanding < 0) {
+    const downProgress = (msFromLanding + SLAM_DOWN_MS) / SLAM_DOWN_MS;
+    return lerp(SHADOW_DARK_HEIGHT_UNITS, SHADOW_CONTACT_HEIGHT_UNITS, downProgress * downProgress * downProgress);
+  }
+  if (msFromLanding < SLAM_HOLD_MS) return SHADOW_CONTACT_HEIGHT_UNITS;
+  return lerp(SHADOW_CONTACT_HEIGHT_UNITS, SHADOW_APPEAR_HEIGHT_UNITS, smoothstep((msFromLanding - SLAM_HOLD_MS) / SLAM_LIFT_MS));
 }

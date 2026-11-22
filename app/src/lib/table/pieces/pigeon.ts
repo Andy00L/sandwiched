@@ -333,6 +333,23 @@ function drawHead(variant: PigeonVariant, context: CanvasRenderingContext2D, ink
   }
 }
 
+const PRESSED_EYE_ARM_UNITS = 0.17;
+
+function drawPressedEye(context: CanvasRenderingContext2D, ink: Ink, anchors: PigeonAnchors): void {
+  const { eyeX, eyeY } = anchors;
+  context.fillStyle = ink(PIGEON_HEAD);
+  P2.draw2.ell(context, eyeX, eyeY, 0.25, 0.25);
+  context.strokeStyle = ink(PALETTE.ink, "print");
+  context.lineWidth = 0.08;
+  context.lineCap = "round";
+  context.beginPath();
+  context.moveTo(eyeX - PRESSED_EYE_ARM_UNITS, eyeY - PRESSED_EYE_ARM_UNITS);
+  context.lineTo(eyeX + PRESSED_EYE_ARM_UNITS, eyeY + PRESSED_EYE_ARM_UNITS);
+  context.moveTo(eyeX - PRESSED_EYE_ARM_UNITS, eyeY + PRESSED_EYE_ARM_UNITS);
+  context.lineTo(eyeX + PRESSED_EYE_ARM_UNITS, eyeY - PRESSED_EYE_ARM_UNITS);
+  context.stroke();
+}
+
 function drawBeak(context: CanvasRenderingContext2D, ink: Ink, shape: StandingShape, anchors: PigeonAnchors): void {
   const beakBaseX = anchors.headX + shape.headRadius * 0.82;
   const { headY } = anchors;
@@ -372,7 +389,7 @@ function finishPart(print: Print): void {
   print.felt(0.7);
 }
 
-function printPart(options: CardOptions, draw: PartDrawing, name: string): PigeonPartPrint {
+function printPart(options: CardOptions, draw: PartDrawing, name: string, drawPressed: PartDrawing | null = null): PigeonPartPrint {
   const outline = P2.fromDrawing((context) => draw(context, CUT_INK), { ...PART_CANVAS, name });
   const paint: PaintFn = (print) => {
     print.parts((context, ink) => draw(context, ink));
@@ -383,6 +400,7 @@ function printPart(options: CardOptions, draw: PartDrawing, name: string): Pigeo
       context.save();
       context.scale(-1, 1);
       draw(context, ink);
+      drawPressed?.(context, ink);
       context.restore();
     });
     finishPart(print);
@@ -402,7 +420,12 @@ export function printPigeonKit(options: CardOptions, variant: PigeonVariant): Pi
       tail: printPart(options, (context, ink) => drawTail(context, ink, shape, anchors.bodyY), `pigeon ${variant} tail`),
       body: printPart(options, (context, ink) => drawBody(variant, context, ink, shape, anchors), `pigeon ${variant} body`),
       wing: printPart(options, (context, ink) => drawWing(variant, context, ink, anchors.bodyY), `pigeon ${variant} wing`),
-      head: printPart(options, (context, ink) => drawHead(variant, context, ink, shape, anchors), `pigeon ${variant} head`),
+      head: printPart(
+        options,
+        (context, ink) => drawHead(variant, context, ink, shape, anchors),
+        `pigeon ${variant} head`,
+        (context, ink) => drawPressedEye(context, ink, anchors),
+      ),
       beak: printPart(options, (context, ink) => drawBeak(context, ink, shape, anchors), `pigeon ${variant} beak`),
     },
   };
@@ -477,8 +500,8 @@ export function printCropBags(options: CardOptions): CropBagPrints {
   };
 }
 
-const STAR_OUTER_UNITS = 0.48;
-const STAR_INNER_UNITS = 0.21;
+const STAR_OUTER_UNITS = 0.96;
+const STAR_INNER_UNITS = 0.42;
 
 function starOutline(): Point[] {
   return [...Array(10).keys()].map((step): Point => {
@@ -492,7 +515,7 @@ function paintStar(print: Print): void {
   print.gradient(P2.shade(PALETTE.mustard, 0.14), P2.shade(PALETTE.mustard, -0.18), 0.3);
   print.layer((context) => {
     context.beginPath();
-    context.arc(0, STAR_OUTER_UNITS, 0.1, 0, Math.PI * 2);
+    context.arc(0, STAR_OUTER_UNITS, 0.2, 0, Math.PI * 2);
     context.fill();
   }, PALETTE.creamCore, { depth: 0.5 });
   print.felt(0.5);
@@ -501,4 +524,88 @@ function paintStar(print: Print): void {
 export function printStunStar(options: CardOptions): PigeonPartPrint {
   const outline = starOutline();
   return { outline, materials: makeCard(outline, { ...options, paint: paintStar, back: "kraft" }).material };
+}
+
+const TONGUE_POINTS: Point[] = [
+  [-0.12, 0],
+  [0.16, 0],
+  [0.24, -0.28],
+  [0.18, -0.5],
+  [0.04, -0.56],
+  [-0.08, -0.46],
+  [-0.14, -0.22],
+];
+const CREASE_LENGTH_UNITS = 3.0;
+const CREASE_THICKNESS_UNITS = 0.07;
+
+function paintTongue(print: Print): void {
+  print.gradient(P2.shade(PALETTE.tomato, 0.1), P2.shade(PALETTE.tomato, -0.15), 0.4);
+  print.draw((context) => {
+    context.strokeStyle = P2.rgba(P2.shade(PALETTE.tomato, -0.4), 0.8);
+    context.lineWidth = 0.035;
+    context.beginPath();
+    context.moveTo(0.03, -0.05);
+    context.lineTo(0.05, -0.36);
+    context.stroke();
+  });
+  print.felt(0.5);
+}
+
+function creaseOutline(): Point[] {
+  const halfLength = CREASE_LENGTH_UNITS / 2;
+  return [
+    [-halfLength, 0],
+    [halfLength, 0],
+    [halfLength - 0.05, CREASE_THICKNESS_UNITS],
+    [-halfLength + 0.05, CREASE_THICKNESS_UNITS],
+  ];
+}
+
+function paintCrease(print: Print): void {
+  print.gradient(P2.shade(PALETTE.ink, 0.25), PALETTE.ink, 0.5);
+  print.felt(0.4);
+}
+
+export interface PressedProps {
+  tongue: PigeonPartPrint;
+  crease: PigeonPartPrint;
+}
+
+export function printPressedProps(options: CardOptions): PressedProps {
+  const creasePoints = creaseOutline();
+  return {
+    tongue: { outline: TONGUE_POINTS, materials: makeCard(TONGUE_POINTS, { ...options, paint: paintTongue, back: paintTongue }).material },
+    crease: { outline: creasePoints, materials: makeCard(creasePoints, { ...options, paint: paintCrease, back: "kraft" }).material },
+  };
+}
+
+const FEATHER_SIZE_FACTOR = 1.3;
+const FEATHER_POINTS: Point[] = (
+  [
+    [0, 0],
+    [0.16, 0.18],
+    [0.2, 0.5],
+    [0.12, 0.82],
+    [0, 0.98],
+    [-0.12, 0.8],
+    [-0.18, 0.46],
+    [-0.12, 0.16],
+  ] as const
+).map(([pointX, pointY]): Point => [pointX * FEATHER_SIZE_FACTOR, pointY * FEATHER_SIZE_FACTOR]);
+
+function paintFeather(print: Print): void {
+  print.gradient(PIGEON_WING, P2.shade(PIGEON_WING, -0.2), 0.4);
+  print.draw((context) => {
+    context.strokeStyle = P2.rgba(PIGEON_BAR, 0.7);
+    context.lineWidth = 0.035;
+    context.beginPath();
+    context.moveTo(0, 0.02 * FEATHER_SIZE_FACTOR);
+    context.lineTo(0.02 * FEATHER_SIZE_FACTOR, 0.9 * FEATHER_SIZE_FACTOR);
+    context.stroke();
+  });
+  print.felt(0.5);
+}
+
+export function printFeather(options: CardOptions): PigeonPartPrint {
+  return { outline: FEATHER_POINTS, materials: makeCard(FEATHER_POINTS, { ...options, paint: paintFeather, back: paintFeather }).material };
 }

@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import type { Harness, PlacedPiece } from "papercraft/harness.js";
-import { makeCard } from "papercraft/lib/paperkit-3d.js";
-import type { CardOptions } from "papercraft/lib/paperkit-3d.js";
+import { hinge, makeCard } from "papercraft/lib/paperkit-3d.js";
+import type { CardOptions, HingeHandle } from "papercraft/lib/paperkit-3d.js";
 import { applyFlip } from "../motion/verbs";
 import { TABLE_YAW_RAD } from "../stage/look";
 import { LEG_TOP_UNITS } from "./pigeon";
-import type { CropBagPrints, CropBagStage, PigeonKit, PigeonPartPrint } from "./pigeon";
+import type { CropBagPrints, CropBagStage, PigeonKit, PigeonPartPrint, PressedProps } from "./pigeon";
 
 export interface PigeonPuppet {
   root: THREE.Group;
@@ -16,7 +16,9 @@ export interface PigeonPuppet {
 }
 
 const LEG_SPREAD_UNITS = 0.3;
-const DEPTH = { farWing: -0.14, tail: -0.1, farLeg: -0.06, body: 0, head: 0.04, beak: 0.04, nearLeg: 0.06, nearWing: 0.1, cropBag: 0.16 } as const;
+const DEPTH = { farWing: -0.14, tail: -0.1, farLeg: -0.06, body: 0, head: 0.04, beak: 0.04, tongue: -0.03, nearLeg: 0.06, nearWing: 0.1, cropBag: 0.16, crease: 0.2 } as const;
+const CREASE_TILT_RAD = -0.17;
+const CREASE_FOLDED_RAD = Math.PI / 2 - 0.01;
 
 function pivotAt(parent: THREE.Object3D, pointX: number, pointY: number, depth: number): THREE.Group {
   const pivot = new THREE.Group();
@@ -84,6 +86,29 @@ export function buildPigeonPuppet(kit: PigeonKit, cropBags: CropBagPrints, optio
       cropBag.material = cropBags.materials[stage];
     },
   };
+}
+
+interface PressedPuppetProps {
+  tongue: THREE.Mesh;
+  crease: HingeHandle;
+}
+
+export function attachPressedProps(puppet: PigeonPuppet, kit: PigeonKit, pressed: PressedProps, options: CardOptions, name: string): PressedPuppetProps {
+  const { anchors, shape } = kit;
+  const tongue = makeCard(pressed.tongue.outline, { ...options, materials: pressed.tongue.materials });
+  tongue.position.set(anchors.headX + shape.headRadius * 0.82 + 0.1 - anchors.neckX, anchors.headY - 0.12 - anchors.neckY, DEPTH.tongue);
+  tongue.name = `${name} tongue`;
+  tongue.visible = false;
+  puppet.neck.add(tongue);
+
+  const creaseTilt = pivotAt(puppet.root, -0.15, anchors.bodyY + 0.05, DEPTH.crease);
+  creaseTilt.rotation.z = CREASE_TILT_RAD;
+  const creaseCard = makeCard(pressed.crease.outline, { ...options, materials: pressed.crease.materials });
+  creaseCard.name = `${name} crease`;
+  const crease = hinge(creaseCard, { open: 0, size: 0.12, flat: CREASE_FOLDED_RAD });
+  crease.group.visible = false;
+  creaseTilt.add(crease.group);
+  return { tongue, crease };
 }
 
 export const PIGEON_STANDING_HEIGHT_UNITS = 4.2;

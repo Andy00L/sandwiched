@@ -454,8 +454,13 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
   /** A group whose printed panes glow (P.glow): dim by day, lit at dusk and night. */
   const glowing = (group) => { glowers.push(group); group.traverse((o) => o.userData.setGlow?.(0.35)); };
 
+  // a shadow-only caster: drawn into the key light's shadow map, never by the camera (a stand-in for a shadow the real
+  // geometry cannot cast where the staging needs it)
+  const SHADOW_ONLY_LAYER = 7;
+  const castShadowOnly = (object) => object.traverse((o) => { o.layers.set(SHADOW_ONLY_LAYER); o.castShadow = true; o.receiveShadow = false; });
+  let focusOverride = null; const focusOverrideAt = new THREE.Vector3();
   const H = { THREE, P2, flags, renderer, scene, camera, paper, view, target, walk, hinges, spots, bounds, frame, heroHeight, groundAt, stack, dome,
-    printGround, popup, printed, cardOpts, inFrame, inReach, walkArea, sharpAt, lamp, glowing, hero: null, heroStride: null, stepHooks: [], onStep: (fn) => H.stepHooks.push(fn), restartHooks: [], onRestart: (fn) => H.restartHooks.push(fn), heroTurn: 'yaw', setHero: (h, { stride = null, turn = 'yaw' } = {}) => { H.hero = h; H.heroStride = stride; H.heroTurn = turn; }, start, setRenderScale: (scale) => { renderScaleNow = clampScale(scale); } };
+    printGround, popup, printed, cardOpts, inFrame, inReach, walkArea, sharpAt, lamp, glowing, hero: null, heroStride: null, stepHooks: [], onStep: (fn) => H.stepHooks.push(fn), restartHooks: [], onRestart: (fn) => H.restartHooks.push(fn), heroTurn: 'yaw', setHero: (h, { stride = null, turn = 'yaw' } = {}) => { H.hero = h; H.heroStride = stride; H.heroTurn = turn; }, start, setRenderScale: (scale) => { renderScaleNow = clampScale(scale); }, focusOn: (point) => { focusOverride = point ? focusOverrideAt.copy(point) : null; }, castShadowOnly, keyLight: null };
 
   // ---- start: light, lens, choreography, input, walking, the loop and the capture hook -------------------------------
   function start() {
@@ -467,6 +472,7 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
     const lights = paperLights(scene, L);
     PAPER_LIGHT.leak.value.set(L.leak);      // the world's shadow colour (light.leak), more saturated than the ground, never grey (default: a warm ground's day amber; other light: assets/lights.json)
     enableSoftShadows(lights.key, { softness: L.softness, maxPenumbra: L.maxPenumbra });
+    lights.key.shadow.camera.layers.enable(SHADOW_ONLY_LAYER); H.keyLight = lights.key;
     const post = new PaperPost(renderer, scene, camera, { haze: '#d8bf8e', hazeStart: 34, hazeEnd: 95, hazeAmount: 0.3, focusBand: 0.3, ramp: 0.3, maxBlur: 18,
       tint: [1.03, 0.985, 0.98], saturation: 0.96, greenDesat: 0.3, exposure: 0.82, contrast: 1.18, vignette: 0.03, ...lens });
     const M = moods[flags.MOOD];
@@ -711,6 +717,7 @@ export function createHarness({ bounds = { x0: -64, x1: 64, z0: -62, z1: 38 }, g
     function render() {
       const kd = view.dist / 66;
       if (focusAt) post.focus.copy(focusAt);
+      else if (focusOverride) post.focus.copy(focusOverride);   // H.focusOn(point): a scene's rack focus
       else if (focus && !moved) post.focus.set(...focus);     // the overview's subject (createHarness({ focus }))
       else {
         _fg.set(hero.group.position.x - 3 * kd, 1.8 + hero.group.position.y, hero.group.position.z - 4 * kd);
