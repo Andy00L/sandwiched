@@ -15,15 +15,18 @@ import { fetchWithTimeout } from "./rpc";
 
 export type TransactionSigner = {
   publicKey: PublicKey;
-  signTransaction: (transaction: Transaction) => Promise<Transaction>;
+  signTransaction: (transaction: Transaction) => Promise<Result<Transaction>>;
+  readDecline: () => string | null;
 };
 
 export const createKeypairSigner = (keypair: Keypair): TransactionSigner => ({
   publicKey: keypair.publicKey,
-  signTransaction: async (transaction) => {
-    transaction.partialSign(keypair);
-    return transaction;
-  },
+  signTransaction: async (transaction) =>
+    attemptSync(() => {
+      transaction.partialSign(keypair);
+      return transaction;
+    }),
+  readDecline: () => null,
 });
 
 export type FeePayment = { kind: "sponsor"; routeUrl: string; sponsor: PublicKey } | { kind: "wallet" };
@@ -59,7 +62,7 @@ const signWithEach = async (transaction: Transaction, signers: TransactionSigner
   if (!required.ok) return failure(`[signWithEach] cannot compile the message: ${required.reason}`);
   let signed = transaction;
   for (const signer of signers.filter((candidate) => required.value.has(candidate.publicKey.toBase58()))) {
-    const next = await attempt(() => signer.signTransaction(signed));
+    const next = await signer.signTransaction(signed);
     if (!next.ok) return failure(`[signWithEach] ${signer.publicKey.toBase58()} did not sign: ${next.reason}`);
     signed = next.value;
   }

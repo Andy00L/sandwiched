@@ -4,6 +4,7 @@ import { createSponsoredFeePayment } from "../src/lib/chain/client";
 import { type AccountFeed, createAccountFeed } from "../src/lib/chain/account-feed";
 import { ROLLUP_RPC_URL, ROLLUP_WS_URL, SPONSOR_ROUTE_PATH } from "../src/lib/chain/config";
 import { loadGuestKey } from "../src/lib/chain/guest-key";
+import { createKeypairSigner } from "../src/lib/chain/transport";
 import { startBotBrain } from "../src/lib/game/bot-player";
 import { DEFAULT_BUY_IN_CHIPS } from "../src/lib/game/guest-chain";
 import { LIVE_TIMING } from "../src/lib/game/chain-rules";
@@ -39,7 +40,7 @@ async function startBot(botIndex: number, tableAddressText: string, routeUrl: st
     table: table.value,
     feePayment: feePayment.value,
     keyStore,
-    wallet: loadGuestKey(keyStore).keypair,
+    wallet: createKeypairSigner(loadGuestKey(keyStore).keypair),
     feed,
     signsWith: "session",
     buyInChips: DEFAULT_BUY_IN_CHIPS,

@@ -147,5 +147,5 @@ export function createGuestPlayChain({ client, wallet, table, tableSnapshot, key
     return seatActions.prepareLeave(seat.value?.chips ?? 0n);
   };
 
-  return { guest: { readFacts, run }, actions, needs, cashOut, prepareLeave };
+  return { guest: { readFacts, run, readDecline: wallet.readDecline }, actions, needs, cashOut, prepareLeave };
 }

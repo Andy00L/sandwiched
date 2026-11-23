@@ -16,11 +16,12 @@ export type GuestNeeds = { chipsToPlay: bigint; unitsPerBuyIn: bigint };
 export type GuestStage =
   | { kind: "preparing"; step: GuestStep; attempt: number }
   | { kind: "ready" }
-  | { kind: "failed"; step: GuestStep; reason: string };
+  | { kind: "failed"; step: GuestStep | "wallet"; reason: string };
 
 export type GuestChain = {
   readFacts: () => Promise<Result<GuestFacts>>;
   run: (step: GuestStep) => Promise<Result<string>>;
+  readDecline: () => string | null;
 };
 
 export type GuestLane = "seat" | "money";
@@ -50,7 +51,7 @@ export type GuestLoopOptions = {
 
 const FIRST_LANE_STEP: Record<GuestLane, GuestStep> = { seat: "sit", money: "fund" };
 
-type LaneEnd = { kind: "done" } | { kind: "stopped" } | { kind: "failed"; step: GuestStep; reason: string };
+type LaneEnd = { kind: "done" } | { kind: "stopped" } | { kind: "failed"; step: GuestStep | "wallet"; reason: string };
 
 async function runLane(chain: GuestChain, lane: GuestLane, options: GuestLoopOptions): Promise<LaneEnd> {
   let lastStep: GuestStep | null = null;
@@ -74,6 +75,8 @@ async function runLane(chain: GuestChain, lane: GuestLane, options: GuestLoopOpt
       continue;
     }
     console.warn(`[runLane] ${step} attempt ${attempt}: ${ran.reason}`);
+    const declined = chain.readDecline();
+    if (declined !== null) return { kind: "failed", step: "wallet", reason: declined };
     await options.wait(options.retryDelayMs * attempt);
   }
 }

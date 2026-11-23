@@ -13,7 +13,7 @@ const SUMMARY = { roundNumber: 4, tableAddress: "table", whaleCrumbs: 500, pigeo
 
 describe("stepPlay", () => {
   test("a visitor picks a table, plays now, and sits once the guest is ready", () => {
-    const seating = play({ kind: "pickTable", table: TABLE }, { kind: "playNow" }, { kind: "seatStage", stage: { kind: "preparing", step: "deposit", attempt: 1 } });
+    const seating = play({ kind: "pickTable", table: TABLE }, { kind: "playNow", walletName: null }, { kind: "seatStage", stage: { kind: "preparing", step: "deposit", attempt: 1 } });
     expect(seating.flow).toMatchObject({ kind: "seat", sheet: { phase: "seating", step: "deposit" } });
     const seated = stepPlay(seating, { kind: "seatStage", stage: { kind: "ready" } });
     expect(seated.flow).toMatchObject({ kind: "table", overlay: { kind: "none" } });
@@ -21,15 +21,25 @@ describe("stepPlay", () => {
   });
 
   test("a failed seat shows its reason and can be tried again, but not abandoned mid-way", () => {
-    const failed = play({ kind: "pickTable", table: TABLE }, { kind: "playNow" }, { kind: "seatStage", stage: { kind: "failed", step: "fund", reason: "faucet dry" } });
+    const failed = play({ kind: "pickTable", table: TABLE }, { kind: "playNow", walletName: null }, { kind: "seatStage", stage: { kind: "failed", step: "fund", reason: "faucet dry" } });
     expect(failed.flow).toMatchObject({ kind: "seat", sheet: { phase: "failed", reason: "faucet dry" } });
-    const retrying = stepPlay(failed, { kind: "playNow" });
+    const retrying = stepPlay(failed, { kind: "playNow", walletName: null });
     expect(retrying.flow).toMatchObject({ kind: "seat", sheet: { phase: "seating" } });
     expect(stepPlay(retrying, { kind: "goHome" }).flow.kind).toBe("seat");
   });
 
+  test("a wallet player sees when the wallet waits for them, and a refused connection can be tried again", () => {
+    const seating = play({ kind: "pickTable", table: TABLE }, { kind: "playNow", walletName: "Phantom" }, { kind: "walletPrompt", isWaiting: true });
+    expect(seating.flow).toMatchObject({ sheet: { phase: "seating", walletName: "Phantom", isAwaitingWallet: true } });
+    const depositing = stepPlay(seating, { kind: "seatStage", stage: { kind: "preparing", step: "deposit", attempt: 1 } });
+    expect(depositing.flow).toMatchObject({ sheet: { step: "deposit", walletName: "Phantom", isAwaitingWallet: true } });
+    const refused = stepPlay(stepPlay(seating, { kind: "walletPrompt", isWaiting: false }), { kind: "walletFailed", reason: "user rejected" });
+    expect(refused.flow).toMatchObject({ sheet: { phase: "failed", step: "wallet", reason: "user rejected" } });
+    expect(stepPlay(refused, { kind: "playNow", walletName: "Phantom" }).flow).toMatchObject({ sheet: { phase: "seating", isAwaitingWallet: false } });
+  });
+
   test("shows the role sheet once per round and the results once per round", () => {
-    const seated = play({ kind: "pickTable", table: TABLE }, { kind: "playNow" }, { kind: "seatStage", stage: { kind: "ready" } });
+    const seated = play({ kind: "pickTable", table: TABLE }, { kind: "playNow", walletName: null }, { kind: "seatStage", stage: { kind: "ready" } });
     const withRole = stepPlay(seated, { kind: "roundLive", roundNumber: 4, role: "whale" });
     expect(withRole.flow).toMatchObject({ overlay: { kind: "role", role: "whale" } });
     expect(isTableOpenForPlay(withRole)).toBe(false);
@@ -47,7 +57,7 @@ describe("stepPlay", () => {
   test("cashing out goes from the results to a receipt, and a receipt that left money on the rollup can try again", () => {
     const results = play(
       { kind: "pickTable", table: TABLE },
-      { kind: "playNow" },
+      { kind: "playNow", walletName: null },
       { kind: "seatStage", stage: { kind: "ready" } },
       { kind: "roundSettled", summary: SUMMARY, frame: null },
     );
@@ -60,7 +70,7 @@ describe("stepPlay", () => {
   });
 
   test("an open drawer covers the table and toggles closed with the same key", () => {
-    const seated = play({ kind: "pickTable", table: TABLE }, { kind: "playNow" }, { kind: "seatStage", stage: { kind: "ready" } });
+    const seated = play({ kind: "pickTable", table: TABLE }, { kind: "playNow", walletName: null }, { kind: "seatStage", stage: { kind: "ready" } });
     const helping = stepPlay(seated, { kind: "toggleDrawer", drawer: "help" });
     expect(isTableOpenForPlay(helping)).toBe(false);
     expect(stepPlay(helping, { kind: "toggleDrawer", drawer: "help" }).drawer).toBeNull();

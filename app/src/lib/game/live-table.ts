@@ -1,4 +1,4 @@
-import { type Keypair, PublicKey } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import { type AccountFeed, createAccountFeed } from "../chain/account-feed";
 import { type TableSnapshot, fetchTable, watchSeat, watchTable } from "../chain/accounts";
 import { findSeatAddress } from "../chain/addresses";
@@ -8,7 +8,7 @@ import type { KeyStore } from "../chain/key-store";
 import { type SandwichProgram, createChainPrograms } from "../chain/program";
 import { type Result, attemptSync, failure, success } from "../chain/result";
 import { createRpcConnection } from "../chain/rpc";
-import { type FeePayment, createKeypairSigner, sendOnRollupOnExit } from "../chain/transport";
+import { type FeePayment, type TransactionSigner, sendOnRollupOnExit } from "../chain/transport";
 import { LIVE_TIMING } from "./chain-rules";
 import type { PreparedLeave } from "../chain/player";
 import { type ActionSigner, type CashOutReceipt, createGuestPlayChain } from "./guest-chain";
@@ -112,7 +112,7 @@ export type GuestSeatSetup = {
   table: PublicKey;
   feePayment: FeePayment;
   keyStore: KeyStore;
-  wallet: Keypair;
+  wallet: TransactionSigner;
   feed: AccountFeed;
   signsWith: ActionSigner;
   buyInChips: bigint;
@@ -139,7 +139,7 @@ export async function seatGuest(setup: GuestSeatSetup): Promise<Result<GuestSeat
   const tableSnapshot = await fetchTable(program, client.rollup, table);
   if (!tableSnapshot.ok) return failure(`[seatGuest] ${tableSnapshot.reason}`);
   if (tableSnapshot.value === null) return failure(`[seatGuest] no table at ${table.toBase58()} on the rollup`);
-  const wallet = createKeypairSigner(setup.wallet);
+  const { wallet } = setup;
   const store = createTableStore({ ownWallet: wallet.publicKey });
   let latestTable: TableSnapshot = tableSnapshot.value;
   const stopFeed = connectTableStore(store, { feed, program, table }, (snapshot) => (latestTable = snapshot));
@@ -178,7 +178,7 @@ export type CompanionSeat = { table: PublicKey; feed: AccountFeed; keyStore: Key
 export type LivePlaySetup = {
   table: PublicKey;
   keyStore: KeyStore;
-  guestKey: Keypair;
+  wallet: TransactionSigner;
   timeoutMs: number;
   buyInChips: bigint;
   antePolicy: AntePolicy;
@@ -218,7 +218,7 @@ export async function openLivePlay(setup: LivePlaySetup): Promise<Result<LivePla
     table: setup.table,
     feePayment: feePayment.value,
     keyStore: setup.keyStore,
-    wallet: setup.guestKey,
+    wallet: setup.wallet,
     feed,
     signsWith: "session",
     buyInChips: setup.buyInChips,

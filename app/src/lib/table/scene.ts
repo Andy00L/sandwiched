@@ -37,6 +37,7 @@ import type { GuestStage } from "../game/guest-steps";
 import { loadGuestKey } from "../chain/guest-key";
 import { createBrowserKeyStore } from "../chain/key-store";
 import type { Result } from "../chain/result";
+import { createKeypairSigner } from "../chain/transport";
 import { type LivePlay, openLivePlay, openLiveRoundSource, parseTableAddress } from "../game/live-table";
 import { openPracticePlay } from "../game/practice-table";
 import type { ClickTarget } from "../game/click-intent";
@@ -205,8 +206,8 @@ async function readSceneMode(): Promise<SceneMode> {
     const table = parseTableAddress(tableAddress);
     if (!table.ok) return readPlayMode(table);
     const keyStore = createBrowserKeyStore();
-    const guestKey = loadGuestKey(keyStore).keypair;
-    return readPlayMode(await openLivePlay({ table: table.value, keyStore, guestKey, timeoutMs: PLAY_WAIT_MS, buyInChips: DEFAULT_BUY_IN_CHIPS, antePolicy: "everyRound", onStage: reportGuestStage, startCompanions: null }));
+    const wallet = createKeypairSigner(loadGuestKey(keyStore).keypair);
+    return readPlayMode(await openLivePlay({ table: table.value, keyStore, wallet, timeoutMs: PLAY_WAIT_MS, buyInChips: DEFAULT_BUY_IN_CHIPS, antePolicy: "everyRound", onStage: reportGuestStage, startCompanions: null }));
   }
   if (tableAddress) {
     const live = await openLiveRoundSource(tableAddress, LIVE_TABLE_TIMEOUT_MS);

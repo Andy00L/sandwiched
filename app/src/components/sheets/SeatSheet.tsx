@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { CHIPS_PER_ANTE } from "@/lib/game/chain-rules";
+import Image from "next/image";
+import { useState, useSyncExternalStore } from "react";
+import { type WalletChoice, walletDirectory } from "@/lib/chain/browser-wallets";
+import { CHIPS_PER_ANTE, FAUCET_UNITS } from "@/lib/game/chain-rules";
 import { formatUsdc } from "@/lib/game/game-session";
 import type { GuestStep } from "@/lib/game/guest-steps";
+import type { SeatWallet } from "@/lib/game/play-controller";
 import type { PlayFlow } from "@/lib/game/play-flow";
 import { ChipStackIcon } from "./CutPaperIcons";
 import { InkButton } from "./InkButton";
@@ -25,7 +28,8 @@ const STEP_WORDS: Record<GuestStep, string> = {
   buyIn: "Buying chips",
 };
 
-const FAILURE_WORDS: Record<GuestStep, string> = {
+const FAILURE_WORDS: Record<GuestStep | "wallet", string> = {
+  wallet: "Your wallet did not approve.",
   sit: "The table did not take the seat.",
   session: "The session key was not signed.",
   join: "The table is full or closed.",
@@ -34,13 +38,26 @@ const FAILURE_WORDS: Record<GuestStep, string> = {
   buyIn: "The chips were not bought.",
 };
 
-export type SeatSheetProps = { flow: SeatFlow | null; onPlay: (buyInChips: bigint) => void; onBack: () => void };
+const WALLET_ICON_PX = 20;
+const GUEST_WALLET: SeatWallet = { kind: "guest" };
+
+export type SeatSheetProps = { flow: SeatFlow | null; onPlay: (buyInChips: bigint, seatWallet: SeatWallet) => void; onBack: () => void };
+
+const FAUCET_LIMIT_REASON = `More than the ${formatUsdc(FAUCET_UNITS)} test USDC the faucet gives in an hour`;
 
 function ChipChoice({ chipUnits, chosen, onChoose }: { chipUnits: bigint; chosen: bigint; onChoose: (chips: bigint) => void }) {
   return (
     <div className={styles.actions} role="group" aria-label="Chips to buy">
       {CHIP_CHOICES.map((chips) => (
-        <button key={chips.toString()} type="button" className={styles.link} aria-pressed={chips === chosen} onClick={() => onChoose(chips)}>
+        <button
+          key={chips.toString()}
+          type="button"
+          className={styles.link}
+          aria-pressed={chips === chosen}
+          disabled={chips * chipUnits > FAUCET_UNITS}
+          title={chips * chipUnits > FAUCET_UNITS ? FAUCET_LIMIT_REASON : undefined}
+          onClick={() => onChoose(chips)}
+        >
           <ChipStackIcon chips={Number(chips)} size={44} />
           <span style={{ display: "block", fontWeight: chips === chosen ? 700 : 400, textDecoration: chips === chosen ? "underline" : "none" }}>
             {chips.toString()} chips
@@ -52,9 +69,41 @@ function ChipChoice({ chipUnits, chosen, onChoose }: { chipUnits: bigint; chosen
   );
 }
 
+function WalletChoices({ wallets, onPick }: { wallets: readonly WalletChoice[]; onPick: (choice: WalletChoice) => void }) {
+  if (wallets.length === 0) return null;
+  return (
+    <>
+      <p className={styles.label}>Or use your wallet</p>
+      <div className={styles.actions}>
+        {wallets.map((choice) => (
+          <InkButton key={choice.name} onPress={() => onPick(choice)}>
+            <span className={styles.walletName}>
+              <Image src={choice.icon} alt="" width={WALLET_ICON_PX} height={WALLET_ICON_PX} unoptimized />
+              {choice.name}
+            </span>
+          </InkButton>
+        ))}
+      </div>
+      <p className={styles.small}>Your wallet signs up to five times to seat you. After that, pecking needs no popups for one hour.</p>
+    </>
+  );
+}
+
+function describeSeating(sheet: Extract<SeatFlow["sheet"], { phase: "seating" }>): string {
+  if (sheet.walletName !== null && sheet.isAwaitingWallet) return `Waiting for you in ${sheet.walletName}`;
+  if (sheet.step !== null) return STEP_WORDS[sheet.step];
+  return sheet.walletName === null ? "Opening a test wallet" : `Connecting ${sheet.walletName}`;
+}
+
 export function SeatSheet({ flow, onPlay, onBack }: SeatSheetProps) {
   const shown = useLatestShown(flow);
+  const wallets = useSyncExternalStore(walletDirectory.subscribe, walletDirectory.getSnapshot, walletDirectory.getServerSnapshot);
   const [chosenChips, setChosenChips] = useState<bigint>(DEFAULT_CHIPS);
+  const [lastWallet, setLastWallet] = useState<SeatWallet>(GUEST_WALLET);
+  const play = (seatWallet: SeatWallet) => {
+    setLastWallet(seatWallet);
+    onPlay(chosenChips, seatWallet);
+  };
   if (shown === null) return (
       <PaperSheet isOpen={false} size="full" seed={11} label="Seat">
         {null}
@@ -73,13 +122,14 @@ export function SeatSheet({ flow, onPlay, onBack }: SeatSheetProps) {
           {isPractice ? null : <ChipChoice chipUnits={chipUnits} chosen={chosenChips} onChoose={setChosenChips} />}
           <p className={styles.body}>A test wallet is made in this browser and filled with test USDC. Nothing to install, nothing to sign.</p>
           <div className={styles.actions}>
-            <InkButton isPrimary onPress={() => onPlay(chosenChips)}>
+            <InkButton isPrimary onPress={() => play(GUEST_WALLET)}>
               Play now
             </InkButton>
             <button type="button" className={styles.link} onClick={onBack}>
               Back to the park
             </button>
           </div>
+          {isPractice ? null : <WalletChoices wallets={wallets} onPick={(choice) => play({ kind: "browser", choice })} />}
         </>
       ) : null}
       {sheet.phase === "seating" ? (
@@ -93,7 +143,7 @@ export function SeatSheet({ flow, onPlay, onBack }: SeatSheetProps) {
             </span>
           </h2>
           <p className={styles.body} aria-live="polite">
-            {sheet.step === null ? "Opening a test wallet" : STEP_WORDS[sheet.step]}
+            {describeSeating(sheet)}
           </p>
         </>
       ) : null}
@@ -103,7 +153,7 @@ export function SeatSheet({ flow, onPlay, onBack }: SeatSheetProps) {
           <p className={styles.body}>{FAILURE_WORDS[sheet.step]}</p>
           <p className={styles.small}>{sheet.reason}</p>
           <div className={styles.actions}>
-            <InkButton isPrimary onPress={() => onPlay(chosenChips)}>
+            <InkButton isPrimary onPress={() => play(lastWallet)}>
               Try again
             </InkButton>
             <button type="button" className={styles.link} onClick={onBack}>

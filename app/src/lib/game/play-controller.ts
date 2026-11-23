@@ -1,6 +1,8 @@
+import { type WalletChoice, connectBrowserWallet } from "../chain/browser-wallets";
 import { loadGuestKey } from "../chain/guest-key";
 import { createBrowserKeyStore } from "../chain/key-store";
 import type { Result } from "../chain/result";
+import { type TransactionSigner, createKeypairSigner } from "../chain/transport";
 import { ROLE_SHEET_S, revealSheetDelayS } from "../table/motion/motion-tokens";
 import { captureSceneFrame } from "../table/stage/scene-capture";
 import { readPigeonBox } from "./chain-rules";
@@ -16,12 +18,14 @@ const PLAY_WAIT_MS = 120_000;
 const BOX_KEYS: Readonly<Record<string, number>> = { Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 };
 const TAKE_OFF_KEYS = new Set(["KeyW", "ArrowUp"]);
 
+export type SeatWallet = { kind: "guest" } | { kind: "browser"; choice: WalletChoice };
+
 export type PlayController = {
   subscribe: (listener: () => void) => () => void;
   getSnapshot: () => PlayState;
   pickTable: (table: TableListing) => void;
   goHome: () => void;
-  playNow: (buyInChips: bigint) => void;
+  playNow: (buyInChips: bigint, seatWallet: SeatWallet) => void;
   anteAgain: () => void;
   cashOut: () => void;
   openShare: () => void;
@@ -34,11 +38,11 @@ export type PlayController = {
 
 export type PlayControllerPorts = { onLiveSource: (source: RoundSource, readOwnSeat: () => number | null) => void; onMuteKey: () => void };
 
-const openListedTable = (table: TableListing, buyInChips: bigint, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> => {
+const openListedTable = (table: TableListing, buyInChips: bigint, browserWallet: TransactionSigner | null, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> => {
   if (table.kind === "practice") return openPracticePlay(PLAY_WAIT_MS, "whenAsked", onStage);
   const keyStore = createBrowserKeyStore();
-  const guestKey = loadGuestKey(keyStore).keypair;
-  return openLivePlay({ table: table.address, keyStore, guestKey, timeoutMs: PLAY_WAIT_MS, buyInChips, antePolicy: "whenAsked", onStage, startCompanions: null });
+  const wallet = browserWallet ?? createKeypairSigner(loadGuestKey(keyStore).keypair);
+  return openLivePlay({ table: table.address, keyStore, wallet, timeoutMs: PLAY_WAIT_MS, buyInChips, antePolicy: "whenAsked", onStage, startCompanions: null });
 };
 
 export function createPlayController(ports: PlayControllerPorts): PlayController {
@@ -83,11 +87,18 @@ export function createPlayController(ports: PlayControllerPorts): PlayController
     });
   };
 
-  const playNow = async (buyInChips: bigint) => {
+  const playNow = async (buyInChips: bigint, seatWallet: SeatWallet) => {
     if (state.flow.kind !== "seat" || state.flow.sheet.phase === "seating") return;
     const table = state.flow.table;
-    dispatch({ kind: "playNow" });
-    const opened = await openListedTable(table, buyInChips, (stage) => dispatch({ kind: "seatStage", stage }));
+    dispatch({ kind: "playNow", walletName: seatWallet.kind === "browser" ? seatWallet.choice.name : null });
+    const onPrompt = (isWaiting: boolean) => dispatch({ kind: "walletPrompt", isWaiting });
+    const connected = seatWallet.kind === "browser" ? await connectBrowserWallet(seatWallet.choice, onPrompt) : null;
+    if (connected !== null && !connected.ok) {
+      console.warn(`[playNow] ${connected.reason}`);
+      dispatch({ kind: "walletFailed", reason: connected.reason });
+      return;
+    }
+    const opened = await openListedTable(table, buyInChips, connected?.value ?? null, (stage) => dispatch({ kind: "seatStage", stage }));
     if (!opened.ok) {
       console.warn(`[playNow] ${opened.reason}`);
       dispatch({ kind: "seatStage", stage: { kind: "failed", step: "sit", reason: opened.reason } });
@@ -157,7 +168,7 @@ export function createPlayController(ports: PlayControllerPorts): PlayController
     getSnapshot: () => state,
     pickTable: (table) => dispatch({ kind: "pickTable", table }),
     goHome: () => dispatch({ kind: "goHome" }),
-    playNow: (buyInChips) => void playNow(buyInChips),
+    playNow: (buyInChips, seatWallet) => void playNow(buyInChips, seatWallet),
     anteAgain,
     cashOut: () => void cashOut(),
     openShare: () => dispatch({ kind: "openShare" }),

@@ -4,6 +4,7 @@ import type { PigeonView } from "./view-state";
 
 export const TICK_MS = 10;
 export const CHIPS_PER_ANTE = 100;
+export const FAUCET_UNITS = 5_000_000n;
 export const MIN_PLAYERS = 2;
 export const MAX_SEATS = 21;
 const SWAT_DROP_PERCENT = 50;

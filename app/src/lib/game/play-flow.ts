@@ -18,7 +18,10 @@ export type RoundSummary = {
   topPigeons: readonly PigeonTally[];
 };
 
-export type SeatSheet = { phase: "choosing" } | { phase: "seating"; step: GuestStep | null } | { phase: "failed"; step: GuestStep; reason: string };
+export type SeatSheet =
+  | { phase: "choosing" }
+  | { phase: "seating"; step: GuestStep | null; walletName: string | null; isAwaitingWallet: boolean }
+  | { phase: "failed"; step: GuestStep | "wallet"; reason: string };
 
 export type TableOverlay =
   | { kind: "none" }
@@ -48,7 +51,9 @@ export type PlayState = {
 export type PlayEvent =
   | { kind: "pickTable"; table: TableListing }
   | { kind: "goHome" }
-  | { kind: "playNow" }
+  | { kind: "playNow"; walletName: string | null }
+  | { kind: "walletPrompt"; isWaiting: boolean }
+  | { kind: "walletFailed"; reason: string }
   | { kind: "seatStage"; stage: GuestStage }
   | { kind: "roundLive"; roundNumber: number; role: Role }
   | { kind: "roleSeen"; roundNumber: number }
@@ -74,7 +79,7 @@ function stepSeatStage(state: PlayState, stage: GuestStage): PlayState {
   if (flow.kind !== "seat" || flow.sheet.phase !== "seating") return state;
   switch (stage.kind) {
     case "preparing":
-      return withFlow(state, { ...flow, sheet: { phase: "seating", step: stage.step } });
+      return withFlow(state, { ...flow, sheet: { ...flow.sheet, step: stage.step } });
     case "ready":
       return withFlow(state, { kind: "table", table: flow.table, overlay: { kind: "none" } });
     case "failed":
@@ -90,7 +95,15 @@ export function stepPlay(state: PlayState, event: PlayEvent): PlayState {
     case "goHome":
       return flow.kind === "seat" && flow.sheet.phase !== "seating" ? withFlow(state, { kind: "home" }) : state;
     case "playNow":
-      return flow.kind === "seat" && flow.sheet.phase !== "seating" ? withFlow(state, { ...flow, sheet: { phase: "seating", step: null } }) : state;
+      return flow.kind === "seat" && flow.sheet.phase !== "seating"
+        ? withFlow(state, { ...flow, sheet: { phase: "seating", step: null, walletName: event.walletName, isAwaitingWallet: false } })
+        : state;
+    case "walletPrompt":
+      return flow.kind === "seat" && flow.sheet.phase === "seating" && flow.sheet.isAwaitingWallet !== event.isWaiting
+        ? withFlow(state, { ...flow, sheet: { ...flow.sheet, isAwaitingWallet: event.isWaiting } })
+        : state;
+    case "walletFailed":
+      return flow.kind === "seat" && flow.sheet.phase === "seating" ? withFlow(state, { ...flow, sheet: { phase: "failed", step: "wallet", reason: event.reason } }) : state;
     case "seatStage":
       return stepSeatStage(state, event.stage);
     case "roundLive":

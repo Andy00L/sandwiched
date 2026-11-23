@@ -5,7 +5,7 @@ import { type GuestChain, type GuestFacts, type GuestStage, type GuestStep, choo
 const NEEDS = { chipsToPlay: 100n, unitsPerBuyIn: 1_000_000n };
 const FRESH: GuestFacts = { isSeatOnRollup: false, hasSession: false, seatIndex: null, chips: 0n, walletUnits: 0n, rollupUnits: 0n };
 
-const createFakeGuestChain = (start: GuestFacts, refusing: ReadonlySet<GuestStep> = new Set()) => {
+const createFakeGuestChain = (start: GuestFacts, refusing: ReadonlySet<GuestStep> = new Set(), declinedReason: string | null = null) => {
   const facts = { ...start };
   const ran: GuestStep[] = [];
   const effects: Record<GuestStep, () => void> = {
@@ -30,6 +30,7 @@ const createFakeGuestChain = (start: GuestFacts, refusing: ReadonlySet<GuestStep
       effects[step]();
       return success(`${step}-signature`);
     },
+    readDecline: () => declinedReason,
   };
   return { chain, ran };
 };
@@ -92,5 +93,12 @@ describe("prepareGuest", () => {
     expect(await outcome).toMatchObject({ kind: "failed", step: "fund" });
     expect(ran.filter((step) => step === "fund")).toHaveLength(3);
     expect(stages.at(-1)).toMatchObject({ kind: "failed", step: "fund" });
+  });
+
+  test("a wallet that declines ends the seating at once, without asking again", async () => {
+    const { chain, ran } = createFakeGuestChain(FRESH, new Set<GuestStep>(["sit", "fund"]), "the wallet declined");
+    const { outcome } = runLoop(chain);
+    expect(await outcome).toEqual({ kind: "failed", step: "wallet", reason: "the wallet declined" });
+    expect(ran).toHaveLength(2);
   });
 });

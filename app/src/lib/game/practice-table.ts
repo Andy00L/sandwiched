@@ -5,6 +5,7 @@ import { createChainClient } from "../chain/client";
 import { type KeyStore, createBrowserKeyStore } from "../chain/key-store";
 import { loadGuestKey } from "../chain/guest-key";
 import { type Result, attempt, failure, success } from "../chain/result";
+import { createKeypairSigner } from "../chain/transport";
 import { rng } from "../papercraft/lib/paperkit-2d.js";
 import { startBotBrain } from "./bot-player";
 import { LIVE_TIMING } from "./chain-rules";
@@ -93,7 +94,7 @@ async function startBot(setup: PracticeBotsSetup, bot: Keypair, botIndex: number
     table: setup.table,
     feePayment: { kind: "wallet" },
     keyStore: setup.keyStore,
-    wallet: bot,
+    wallet: createKeypairSigner(bot),
     feed: setup.feed,
     signsWith: "wallet",
     buyInChips: DEFAULT_BUY_IN_CHIPS,
@@ -169,5 +170,5 @@ export async function openPracticePlay(timeoutMs: number, antePolicy: AntePolicy
   if (!bots.ok) return failure(`[openPracticePlay] ${bots.reason}`);
   const startCompanions = (seat: CompanionSeat) =>
     drivePracticeBots({ table: seat.table, feed: seat.feed, keyStore: seat.keyStore, bots: bots.value, driver: seat.guest, seed: PRACTICE_BOT_SEED });
-  return openLivePlay({ table: listing.value.address, keyStore, guestKey, timeoutMs, buyInChips: DEFAULT_BUY_IN_CHIPS, antePolicy, onStage, startCompanions });
+  return openLivePlay({ table: listing.value.address, keyStore, wallet: createKeypairSigner(guestKey), timeoutMs, buyInChips: DEFAULT_BUY_IN_CHIPS, antePolicy, onStage, startCompanions });
 }
