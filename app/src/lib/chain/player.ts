@@ -1,4 +1,5 @@
 import { isMagicAtaTokenAccount, withdrawSpl } from "@magicblock-labs/ephemeral-rollups-sdk";
+import { createAssociatedTokenAccountIdempotentInstruction, createTransferInstruction } from "@solana/spl-token";
 import type { Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { findSeatAddress, findWalletTokenAddress } from "./addresses";
 import type { ChainClient } from "./client";
@@ -20,7 +21,7 @@ import {
   buildStartRoundInstruction,
   buildTakeOffInstruction,
 } from "./program";
-import { type Result, attempt, failure, success } from "./result";
+import { type Result, attempt, failure, pollUntil, success } from "./result";
 import type { SessionKeeper } from "./session";
 import {
   type BaseSend,
@@ -91,6 +92,43 @@ export const withdrawToBase = async (
   );
   if (!sent.ok) return sent;
   return success({ signature: sent.value.signature, units: rollupUnits.value, expectedBaseUnits: baseUnits.value + rollupUnits.value });
+};
+
+export const buildPayoutInstructions = (payer: PublicKey, owner: PublicKey, mint: PublicKey, payout: PublicKey, units: bigint): TransactionInstruction[] => {
+  const destination = findWalletTokenAddress(payout, mint);
+  return [
+    createAssociatedTokenAccountIdempotentInstruction(payer, destination, payout, mint),
+    createTransferInstruction(findWalletTokenAddress(owner, mint), destination, owner, units),
+  ];
+};
+
+const PAYOUT_LANDING_TIMEOUT_MS = 60_000;
+const PAYOUT_POLL_MS = 500;
+
+export type Payout = { signature: string; units: bigint };
+
+export const payOutToWallet = async (
+  client: ChainClient,
+  wallet: TransactionSigner,
+  mint: PublicKey,
+  payout: PublicKey,
+  expectedBaseUnits: bigint,
+): Promise<Result<Payout>> => {
+  const walletToken = findWalletTokenAddress(wallet.publicKey, mint);
+  const landed = await pollUntil(
+    "payOutToWallet base balance",
+    async () => {
+      const units = await readTokenUnits(client.base, walletToken);
+      return units.ok && units.value >= expectedBaseUnits ? units.value : null;
+    },
+    PAYOUT_LANDING_TIMEOUT_MS,
+    PAYOUT_POLL_MS,
+  );
+  if (!landed.ok) return landed;
+  if (landed.value === 0n) return failure("[payOutToWallet] nothing to send");
+  const payer = resolveFeePayer(client.feePayment, wallet.publicKey);
+  const sent = await sendBuiltOnBase(client, "payOutToWallet", async () => buildPayoutInstructions(payer, wallet.publicKey, mint, payout, landed.value), wallet);
+  return sent.ok ? success({ signature: sent.value.signature, units: landed.value }) : sent;
 };
 
 export type SeatActions = {

@@ -23,6 +23,7 @@ import {
   buildSitInstructions,
   createChainPrograms,
 } from "./program";
+import { buildPayoutInstructions } from "./player";
 import { parseSponsorRequest, reviewSponsoredTransaction } from "./sponsor-policy";
 
 const programs = createChainPrograms(new Connection("http://127.0.0.1:8899"));
@@ -125,6 +126,15 @@ describe("reviewSponsoredTransaction accepts the guest path", () => {
     ]);
   });
 
+  test("a payout of the guest's test USDC to a connected wallet, with that wallet's token account", () => {
+    const instructions = buildPayoutInstructions(sponsor.publicKey, guest.publicKey, testMint, otherGuest.publicKey, 1_000_000n);
+    const transaction = buildTransaction(sponsor.publicKey, instructions);
+    transaction.partialSign(guest);
+    const approval = expectApproved(transaction);
+    expect(approval?.wallet?.equals(guest.publicKey)).toBe(true);
+    expect(approval?.labels).toEqual(["compute_unit_limit", "create_token_account", "payout_transfer"]);
+  });
+
   test("the re-delegation of a stuck deposit shuttle", () => {
     const [shuttleEphemeralAta] = deriveShuttleEphemeralAta(guest.publicKey, testMint, 7);
     const [shuttleAta] = deriveShuttleAta(shuttleEphemeralAta, testMint);
@@ -190,6 +200,30 @@ describe("reviewSponsoredTransaction refuses", () => {
     const guestToken = getAssociatedTokenAddressSync(testMint, guest.publicKey);
     const create = createAssociatedTokenAccountIdempotentInstruction(sponsor.publicKey, guestToken, guest.publicKey, testMint);
     expectRefused(buildTransaction(sponsor.publicKey, [create]), "signature");
+  });
+
+  test("a payout out of another wallet's token account or of another mint", () => {
+    const [, transfer] = buildPayoutInstructions(sponsor.publicKey, guest.publicKey, testMint, otherGuest.publicKey, 1_000_000n);
+    if (transfer === undefined) return expect(transfer).toBeDefined();
+    const fromStranger = transfer.keys.map((key, slot) => (slot === 0 ? { ...key, pubkey: getAssociatedTokenAddressSync(testMint, otherGuest.publicKey) } : key));
+    const stolen = buildTransaction(sponsor.publicKey, [{ ...transfer, keys: fromStranger }]);
+    stolen.partialSign(guest);
+    expectRefused(stolen, "the payout source");
+    const [, otherMintTransfer] = buildPayoutInstructions(sponsor.publicKey, guest.publicKey, otherMint, otherGuest.publicKey, 1_000_000n);
+    if (otherMintTransfer === undefined) return expect(otherMintTransfer).toBeDefined();
+    const wrongMint = buildTransaction(sponsor.publicKey, [otherMintTransfer]);
+    wrongMint.partialSign(guest);
+    expectRefused(wrongMint, "the payout source");
+  });
+
+  test("a stranger's token account that no payout fills, since its owner could close it and keep the rent", () => {
+    const strangerToken = getAssociatedTokenAddressSync(testMint, otherGuest.publicKey);
+    const [, transfer] = buildPayoutInstructions(sponsor.publicKey, guest.publicKey, testMint, guest.publicKey, 1_000_000n);
+    if (transfer === undefined) return expect(transfer).toBeDefined();
+    const create = createAssociatedTokenAccountIdempotentInstruction(sponsor.publicKey, strangerToken, otherGuest.publicKey, testMint);
+    const transaction = buildTransaction(sponsor.publicKey, [create, transfer]);
+    transaction.partialSign(guest);
+    expectRefused(transaction, "receive its payout");
   });
 
   test("a priority fee or a compute limit above the base budget", () => {

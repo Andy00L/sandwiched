@@ -44,6 +44,7 @@ async function startBot(botIndex: number, tableAddressText: string, routeUrl: st
     feed,
     signsWith: "session",
     buyInChips: DEFAULT_BUY_IN_CHIPS,
+    payout: null,
     isCranking: true,
     antePolicy: "everyRound",
     onStage: (stage) => log(`bot ${botIndex} (${temperament}) ${JSON.stringify(stage)}`),

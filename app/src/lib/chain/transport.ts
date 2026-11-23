@@ -16,7 +16,6 @@ import { fetchWithTimeout } from "./rpc";
 export type TransactionSigner = {
   publicKey: PublicKey;
   signTransaction: (transaction: Transaction) => Promise<Result<Transaction>>;
-  readDecline: () => string | null;
 };
 
 export const createKeypairSigner = (keypair: Keypair): TransactionSigner => ({
@@ -26,7 +25,6 @@ export const createKeypairSigner = (keypair: Keypair): TransactionSigner => ({
       transaction.partialSign(keypair);
       return transaction;
     }),
-  readDecline: () => null,
 });
 
 export type FeePayment = { kind: "sponsor"; routeUrl: string; sponsor: PublicKey } | { kind: "wallet" };

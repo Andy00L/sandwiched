@@ -201,13 +201,13 @@ function readPlayMode(play: Result<LivePlay>): SceneMode {
 async function readSceneMode(): Promise<SceneMode> {
   const params = new URLSearchParams(location.search);
   const tableAddress = params.get("table");
-  if (params.has("practice")) return readPlayMode(await openPracticePlay(PLAY_WAIT_MS, "everyRound", reportGuestStage));
+  if (params.has("practice")) return readPlayMode(await openPracticePlay(PLAY_WAIT_MS, "everyRound", null, reportGuestStage));
   if (tableAddress && params.has("play")) {
     const table = parseTableAddress(tableAddress);
     if (!table.ok) return readPlayMode(table);
     const keyStore = createBrowserKeyStore();
     const wallet = createKeypairSigner(loadGuestKey(keyStore).keypair);
-    return readPlayMode(await openLivePlay({ table: table.value, keyStore, wallet, timeoutMs: PLAY_WAIT_MS, buyInChips: DEFAULT_BUY_IN_CHIPS, antePolicy: "everyRound", onStage: reportGuestStage, startCompanions: null }));
+    return readPlayMode(await openLivePlay({ table: table.value, keyStore, wallet, timeoutMs: PLAY_WAIT_MS, buyInChips: DEFAULT_BUY_IN_CHIPS, payout: null, antePolicy: "everyRound", onStage: reportGuestStage, startCompanions: null }));
   }
   if (tableAddress) {
     const live = await openLiveRoundSource(tableAddress, LIVE_TABLE_TIMEOUT_MS);

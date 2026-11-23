@@ -116,6 +116,7 @@ export type GuestSeatSetup = {
   feed: AccountFeed;
   signsWith: ActionSigner;
   buyInChips: bigint;
+  payout: PublicKey | null;
   isCranking: boolean;
   antePolicy: AntePolicy;
   onStage: (stage: GuestStage) => void;
@@ -143,7 +144,7 @@ export async function seatGuest(setup: GuestSeatSetup): Promise<Result<GuestSeat
   const store = createTableStore({ ownWallet: wallet.publicKey });
   let latestTable: TableSnapshot = tableSnapshot.value;
   const stopFeed = connectTableStore(store, { feed, program, table }, (snapshot) => (latestTable = snapshot));
-  const play = createGuestPlayChain({ client, wallet, table, tableSnapshot: tableSnapshot.value, keyStore: setup.keyStore, signsWith: setup.signsWith, buyInChips: setup.buyInChips });
+  const play = createGuestPlayChain({ client, wallet, table, tableSnapshot: tableSnapshot.value, keyStore: setup.keyStore, signsWith: setup.signsWith, buyInChips: setup.buyInChips, payout: setup.payout });
   const player = startTablePlayer({
     store,
     actions: play.actions,
@@ -181,6 +182,7 @@ export type LivePlaySetup = {
   wallet: TransactionSigner;
   timeoutMs: number;
   buyInChips: bigint;
+  payout: PublicKey | null;
   antePolicy: AntePolicy;
   onStage: (stage: GuestStage) => void;
   startCompanions: ((seat: CompanionSeat) => () => void) | null;
@@ -222,6 +224,7 @@ export async function openLivePlay(setup: LivePlaySetup): Promise<Result<LivePla
     feed,
     signsWith: "session",
     buyInChips: setup.buyInChips,
+    payout: setup.payout,
     isCranking: true,
     antePolicy: setup.antePolicy,
     onStage: (stage) => {

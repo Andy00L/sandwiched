@@ -63,7 +63,7 @@ async function seatPracticeBots(client: ChainClient, admin: TransactionSigner, l
       continue;
     }
     const wallet = createKeypairSigner(bot);
-    const play = createGuestPlayChain({ client, wallet, table: listing.address, tableSnapshot: tableSnapshot.value, keyStore, signsWith: "wallet", buyInChips: DEFAULT_BUY_IN_CHIPS });
+    const play = createGuestPlayChain({ client, wallet, table: listing.address, tableSnapshot: tableSnapshot.value, keyStore, signsWith: "wallet", payout: null, buyInChips: DEFAULT_BUY_IN_CHIPS });
     const stage = await prepareGuest(play.guest, {
       needs: play.needs,
       maxAttemptsPerStep: MAX_ATTEMPTS_PER_STEP,

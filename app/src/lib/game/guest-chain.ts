@@ -5,7 +5,7 @@ import type { ChainClient } from "../chain/client";
 import { readDelegationStatus } from "../chain/delegation";
 import { createDepositChain, createDepositQueue } from "../chain/deposits";
 import type { KeyStore } from "../chain/key-store";
-import { type PreparedLeave, claimTestUsdc, createSeatActions, sitAtTable, withdrawToBase } from "../chain/player";
+import { type PreparedLeave, claimTestUsdc, createSeatActions, payOutToWallet, sitAtTable, withdrawToBase } from "../chain/player";
 import { type Result, failure, success } from "../chain/result";
 import { createSessionKeeper } from "../chain/session";
 import { type RollupAck, type TransactionSigner, readTokenUnits } from "../chain/transport";
@@ -26,10 +26,12 @@ export type GuestChainSetup = {
   keyStore: KeyStore;
   signsWith: ActionSigner;
   buyInChips: bigint;
+  payout: PublicKey | null;
 };
 
 export type CashOutReceipt =
-  | { kind: "withdrawn"; chips: bigint; units: bigint; baseSignature: string | null }
+  | { kind: "paidOut"; chips: bigint; units: bigint; wallet: string; signature: string }
+  | { kind: "withdrawn"; chips: bigint; units: bigint; baseSignature: string | null; payoutFailure: string | null }
   | { kind: "onRollup"; chips: bigint; units: bigint; reason: string }
   | { kind: "untouched"; reason: string };
 
@@ -44,7 +46,7 @@ export type GuestPlayChain = {
 const fromAck = (label: string, ack: RollupAck): Result<string> =>
   ack.ok ? success(ack.signature) : failure(`[${label}] ${ack.errorName} ${ack.detail}`);
 
-export function createGuestPlayChain({ client, wallet, table, tableSnapshot, keyStore, signsWith, buyInChips }: GuestChainSetup): GuestPlayChain {
+export function createGuestPlayChain({ client, wallet, table, tableSnapshot, keyStore, signsWith, buyInChips, payout }: GuestChainSetup): GuestPlayChain {
   const mint = tableSnapshot.mint;
   const seatAddress = findSeatAddress(table, wallet.publicKey);
   const walletToken = findWalletTokenAddress(wallet.publicKey, mint);
@@ -138,7 +140,11 @@ export function createGuestPlayChain({ client, wallet, table, tableSnapshot, key
     if (left !== null && !left.ok) console.warn(`[cashOut] leave refused: ${left.errorName} ${left.detail}`);
     const withdrawn = await withdrawToBase(client, wallet, mint, tableSnapshot.validator);
     if (!withdrawn.ok) return success({ kind: "onRollup", chips, units: chips * tableSnapshot.chipUnits, reason: withdrawn.reason });
-    return success({ kind: "withdrawn", chips, units: withdrawn.value.units, baseSignature: withdrawn.value.signature });
+    const kept: CashOutReceipt = { kind: "withdrawn", chips, units: withdrawn.value.units, baseSignature: withdrawn.value.signature, payoutFailure: null };
+    if (payout === null) return success(kept);
+    const paid = await payOutToWallet(client, wallet, mint, payout, withdrawn.value.expectedBaseUnits);
+    if (!paid.ok) return success({ ...kept, payoutFailure: paid.reason });
+    return success({ kind: "paidOut", chips, units: paid.value.units, wallet: payout.toBase58(), signature: paid.value.signature });
   };
 
   const prepareLeave = async (): Promise<Result<PreparedLeave>> => {
@@ -147,5 +153,5 @@ export function createGuestPlayChain({ client, wallet, table, tableSnapshot, key
     return seatActions.prepareLeave(seat.value?.chips ?? 0n);
   };
 
-  return { guest: { readFacts, run, readDecline: wallet.readDecline }, actions, needs, cashOut, prepareLeave };
+  return { guest: { readFacts, run }, actions, needs, cashOut, prepareLeave };
 }

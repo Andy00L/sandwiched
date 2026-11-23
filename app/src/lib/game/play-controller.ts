@@ -1,12 +1,14 @@
-import { type WalletChoice, connectBrowserWallet } from "../chain/browser-wallets";
+import type { PublicKey } from "@solana/web3.js";
+import { type WalletChoice, connectPayoutWallet } from "../chain/browser-wallets";
 import { loadGuestKey } from "../chain/guest-key";
 import { createBrowserKeyStore } from "../chain/key-store";
 import type { Result } from "../chain/result";
-import { type TransactionSigner, createKeypairSigner } from "../chain/transport";
+import { createKeypairSigner } from "../chain/transport";
 import { ROLE_SHEET_S, revealSheetDelayS } from "../table/motion/motion-tokens";
 import { captureSceneFrame } from "../table/stage/scene-capture";
 import { readPigeonBox } from "./chain-rules";
 import type { ClickTarget } from "./click-intent";
+import { startGuestHeadStart } from "./guest-head-start";
 import type { GuestStage } from "./guest-steps";
 import { type LivePlay, openLivePlay } from "./live-table";
 import { type Drawer, INITIAL_PLAY_STATE, type PlayEvent, type PlayState, type Role, isTableOpenForPlay, stepPlay, summarizeRound } from "./play-flow";
@@ -38,11 +40,11 @@ export type PlayController = {
 
 export type PlayControllerPorts = { onLiveSource: (source: RoundSource, readOwnSeat: () => number | null) => void; onMuteKey: () => void };
 
-const openListedTable = (table: TableListing, buyInChips: bigint, browserWallet: TransactionSigner | null, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> => {
-  if (table.kind === "practice") return openPracticePlay(PLAY_WAIT_MS, "whenAsked", onStage);
+const openListedTable = (table: TableListing, buyInChips: bigint, payout: PublicKey | null, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> => {
+  if (table.kind === "practice") return openPracticePlay(PLAY_WAIT_MS, "whenAsked", payout, onStage);
   const keyStore = createBrowserKeyStore();
-  const wallet = browserWallet ?? createKeypairSigner(loadGuestKey(keyStore).keypair);
-  return openLivePlay({ table: table.address, keyStore, wallet, timeoutMs: PLAY_WAIT_MS, buyInChips, antePolicy: "whenAsked", onStage, startCompanions: null });
+  const wallet = createKeypairSigner(loadGuestKey(keyStore).keypair);
+  return openLivePlay({ table: table.address, keyStore, wallet, timeoutMs: PLAY_WAIT_MS, buyInChips, payout, antePolicy: "whenAsked", onStage, startCompanions: null });
 };
 
 export function createPlayController(ports: PlayControllerPorts): PlayController {
@@ -92,12 +94,13 @@ export function createPlayController(ports: PlayControllerPorts): PlayController
     const table = state.flow.table;
     dispatch({ kind: "playNow", walletName: seatWallet.kind === "browser" ? seatWallet.choice.name : null });
     const onPrompt = (isWaiting: boolean) => dispatch({ kind: "walletPrompt", isWaiting });
-    const connected = seatWallet.kind === "browser" ? await connectBrowserWallet(seatWallet.choice, onPrompt) : null;
+    const connected = seatWallet.kind === "browser" ? await connectPayoutWallet(seatWallet.choice, onPrompt) : null;
     if (connected !== null && !connected.ok) {
       console.warn(`[playNow] ${connected.reason}`);
       dispatch({ kind: "walletFailed", reason: connected.reason });
       return;
     }
+    await startGuestHeadStart();
     const opened = await openListedTable(table, buyInChips, connected?.value ?? null, (stage) => dispatch({ kind: "seatStage", stage }));
     if (!opened.ok) {
       console.warn(`[playNow] ${opened.reason}`);
@@ -166,7 +169,10 @@ export function createPlayController(ports: PlayControllerPorts): PlayController
       return () => listeners.delete(listener);
     },
     getSnapshot: () => state,
-    pickTable: (table) => dispatch({ kind: "pickTable", table }),
+    pickTable: (table) => {
+      void startGuestHeadStart();
+      dispatch({ kind: "pickTable", table });
+    },
     goHome: () => dispatch({ kind: "goHome" }),
     playNow: (buyInChips, seatWallet) => void playNow(buyInChips, seatWallet),
     anteAgain,

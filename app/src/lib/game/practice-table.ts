@@ -98,6 +98,7 @@ async function startBot(setup: PracticeBotsSetup, bot: Keypair, botIndex: number
     feed: setup.feed,
     signsWith: "wallet",
     buyInChips: DEFAULT_BUY_IN_CHIPS,
+    payout: null,
     isCranking: false,
     antePolicy: "everyRound",
     onStage: reportBotStage(botIndex),
@@ -161,7 +162,12 @@ export function drivePracticeBots(setup: PracticeBotsSetup): () => void {
 
 const PRACTICE_BOT_SEED = 1;
 
-export async function openPracticePlay(timeoutMs: number, antePolicy: AntePolicy, onStage: (stage: GuestStage) => void): Promise<Result<LivePlay>> {
+export async function openPracticePlay(
+  timeoutMs: number,
+  antePolicy: AntePolicy,
+  payout: PublicKey | null,
+  onStage: (stage: GuestStage) => void,
+): Promise<Result<LivePlay>> {
   const keyStore = createBrowserKeyStore();
   const guestKey = loadGuestKey(keyStore).keypair;
   const listing = await findPracticeTable(guestKey.publicKey);
@@ -170,5 +176,5 @@ export async function openPracticePlay(timeoutMs: number, antePolicy: AntePolicy
   if (!bots.ok) return failure(`[openPracticePlay] ${bots.reason}`);
   const startCompanions = (seat: CompanionSeat) =>
     drivePracticeBots({ table: seat.table, feed: seat.feed, keyStore: seat.keyStore, bots: bots.value, driver: seat.guest, seed: PRACTICE_BOT_SEED });
-  return openLivePlay({ table: listing.value.address, keyStore, wallet: createKeypairSigner(guestKey), timeoutMs, buyInChips: DEFAULT_BUY_IN_CHIPS, antePolicy, onStage, startCompanions });
+  return openLivePlay({ table: listing.value.address, keyStore, wallet: createKeypairSigner(guestKey), timeoutMs, buyInChips: DEFAULT_BUY_IN_CHIPS, payout, antePolicy, onStage, startCompanions });
 }

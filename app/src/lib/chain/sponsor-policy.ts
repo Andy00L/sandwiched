@@ -19,6 +19,9 @@ const ESPL_DELEGATE_EPHEMERAL_ATA = 4;
 const ESPL_DELEGATE_SHUTTLE = 13;
 const ESPL_SETUP_AND_DELEGATE_SHUTTLE_WITH_MERGE = 24;
 const ESPL_WITHDRAW_THROUGH_DELEGATED_SHUTTLE_WITH_MERGE = 26;
+const SPL_TRANSFER = 3;
+const SPL_TRANSFER_DATA_BYTES = 9;
+const SPL_TRANSFER_ACCOUNTS = 3;
 const PUBLIC_KEY_BYTES = 32;
 
 type InstructionRule = {
@@ -30,7 +33,7 @@ type InstructionRule = {
   walletSlot: number | null;
   needsWalletSignature?: boolean;
   findRefusal?: (instruction: TransactionInstruction, policy: SponsorPolicy) => string | null;
-  findWalletRefusal?: (instruction: TransactionInstruction, wallet: PublicKey, policy: SponsorPolicy) => string | null;
+  findWalletRefusal?: (instruction: TransactionInstruction, wallet: PublicKey, policy: SponsorPolicy, payoutDestinations: readonly PublicKey[]) => string | null;
 };
 
 const findSandwichDiscriminator = (instructionName: string): Buffer | null => {
@@ -116,11 +119,29 @@ const INSTRUCTION_RULES: InstructionRule[] = [
     matches: hasTag(ATA_CREATE_IDEMPOTENT, [1]),
     minimumAccounts: 6,
     sponsorSlots: [0],
-    walletSlot: 2,
+    walletSlot: null,
     needsWalletSignature: true,
     findRefusal: (instruction, policy) =>
       requireKey(instruction, 3, policy.testMint, "the token account mint") ??
       requireKey(instruction, 5, TOKEN_PROGRAM_ID, "the token program"),
+    findWalletRefusal: (instruction, wallet, _policy, payoutDestinations) => {
+      if (instruction.keys[2]?.pubkey.equals(wallet) === true) return null;
+      const created = instruction.keys[1]?.pubkey;
+      const isPayoutDestination = created !== undefined && payoutDestinations.some((destination) => destination.equals(created));
+      return isPayoutDestination ? null : "the token account must belong to the signing wallet or receive its payout";
+    },
+  },
+  {
+    label: "payout_transfer",
+    programId: TOKEN_PROGRAM_ID,
+    matches: hasTag(SPL_TRANSFER, [SPL_TRANSFER_DATA_BYTES]),
+    minimumAccounts: SPL_TRANSFER_ACCOUNTS,
+    sponsorSlots: [],
+    walletSlot: 2,
+    needsWalletSignature: true,
+    findRefusal: (instruction) => (instruction.keys.length === SPL_TRANSFER_ACCOUNTS ? null : "a payout has one signing owner"),
+    findWalletRefusal: (instruction, wallet, policy) =>
+      requireKey(instruction, 0, getAssociatedTokenAddressSync(policy.testMint, wallet), "the payout source"),
   },
   {
     label: "create_session_v2",
@@ -229,10 +250,14 @@ export const reviewSponsoredTransaction = (transaction: Transaction, policy: Spo
   if (wallets.some((candidate) => wallet !== undefined && !candidate.equals(wallet))) return failure("a sponsored transaction acts for one wallet");
   const unsignedRule = matched.find(({ rule }) => rule.needsWalletSignature === true && (wallet === undefined || !isSignedBy(transaction, wallet)));
   if (unsignedRule !== undefined) return failure(`${unsignedRule.rule.label} is sponsored only when the wallet's signature is on the transaction`);
+  const payoutDestinations = matched.flatMap(({ instruction, rule }) => {
+    const destination = rule.label === "payout_transfer" ? instruction.keys[1]?.pubkey : undefined;
+    return destination === undefined ? [] : [destination];
+  });
   for (const { instruction, rule } of matched) {
     if (rule.findWalletRefusal === undefined) continue;
     if (wallet === undefined) return failure(`${rule.label} needs a wallet named in the same transaction`);
-    const refusal = rule.findWalletRefusal(instruction, wallet, policy);
+    const refusal = rule.findWalletRefusal(instruction, wallet, policy, payoutDestinations);
     if (refusal !== null) return failure(`${rule.label}: ${refusal}`);
   }
   return success({ wallet: wallet ?? null, labels: matched.map(({ rule }) => rule.label) });

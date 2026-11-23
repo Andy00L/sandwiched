@@ -11,19 +11,45 @@ const DEVNET_EXPLORER_TX = "https://explorer.solana.com/tx/";
 
 export type ReceiptSheetProps = { receipt: CashOutReceipt | null; isCashingOut: boolean; onRetry: () => void };
 
+const shortenAddress = (address: string): string => `${address.slice(0, 4)}...${address.slice(-4)}`;
+
+function TransactionLink({ signature }: { signature: string }) {
+  return (
+    <a className={styles.link} href={`${DEVNET_EXPLORER_TX}${signature}?cluster=devnet`} target="_blank" rel="noreferrer">
+      See the transaction
+    </a>
+  );
+}
+
 function ReceiptLines({ receipt, onRetry }: { receipt: CashOutReceipt; onRetry: () => void }) {
   switch (receipt.kind) {
+    case "paidOut":
+      return (
+        <>
+          <h2 className={styles.title}>Cashed out</h2>
+          <p className={styles.body}>
+            {formatUsdc(receipt.units)} test USDC landed in your wallet {shortenAddress(receipt.wallet)} on Solana devnet.
+          </p>
+          <TransactionLink signature={receipt.signature} />
+        </>
+      );
     case "withdrawn":
       return (
         <>
           <h2 className={styles.title}>Cashed out</h2>
           <p className={styles.body}>
-            {receipt.chips.toString()} chips became {formatUsdc(receipt.units)} test USDC in your wallet on Solana devnet.
+            {receipt.chips.toString()} chips became {formatUsdc(receipt.units)} test USDC in the test wallet of this browser, on Solana devnet.
           </p>
-          {receipt.baseSignature === null ? null : (
-            <a className={styles.link} href={`${DEVNET_EXPLORER_TX}${receipt.baseSignature}?cluster=devnet`} target="_blank" rel="noreferrer">
-              See the transaction
-            </a>
+          {receipt.baseSignature === null ? null : <TransactionLink signature={receipt.baseSignature} />}
+          {receipt.payoutFailure === null ? null : (
+            <>
+              <p className={styles.small}>Sending it on to your wallet did not go through: {receipt.payoutFailure}</p>
+              <div className={styles.actions}>
+                <InkButton isPrimary onPress={onRetry}>
+                  Send it again
+                </InkButton>
+              </div>
+            </>
           )}
         </>
       );

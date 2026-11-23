@@ -37,7 +37,6 @@ const createRecordingActions = () => {
 const readyGuest: GuestChain = {
   readFacts: async () => success({ isSeatOnRollup: true, hasSession: true, seatIndex: OWN_SEAT, chips: 1_000n, walletUnits: 0n, rollupUnits: 0n }),
   run: async () => success("unused"),
-  readDecline: () => null,
 };
 
 const createStubStore = (chainTick: number): TableStore => {

@@ -16,12 +16,11 @@ export type GuestNeeds = { chipsToPlay: bigint; unitsPerBuyIn: bigint };
 export type GuestStage =
   | { kind: "preparing"; step: GuestStep; attempt: number }
   | { kind: "ready" }
-  | { kind: "failed"; step: GuestStep | "wallet"; reason: string };
+  | { kind: "failed"; step: GuestStep; reason: string };
 
 export type GuestChain = {
   readFacts: () => Promise<Result<GuestFacts>>;
   run: (step: GuestStep) => Promise<Result<string>>;
-  readDecline: () => string | null;
 };
 
 export type GuestLane = "seat" | "money";
@@ -51,9 +50,11 @@ export type GuestLoopOptions = {
 
 const FIRST_LANE_STEP: Record<GuestLane, GuestStep> = { seat: "sit", money: "fund" };
 
-type LaneEnd = { kind: "done" } | { kind: "stopped" } | { kind: "failed"; step: GuestStep | "wallet"; reason: string };
+export type LaneEnd = { kind: "done" } | { kind: "stopped" } | { kind: "failed"; step: GuestStep; reason: string };
 
-async function runLane(chain: GuestChain, lane: GuestLane, options: GuestLoopOptions): Promise<LaneEnd> {
+type LaneGoal = "ready" | "funded";
+
+async function runLane(chain: GuestChain, lane: GuestLane, options: GuestLoopOptions, goal: LaneGoal): Promise<LaneEnd> {
   let lastStep: GuestStep | null = null;
   let attempt = 0;
   for (;;) {
@@ -62,6 +63,7 @@ async function runLane(chain: GuestChain, lane: GuestLane, options: GuestLoopOpt
     const step: GuestStep | "done" | "waiting" = facts.ok ? chooseLaneStep(lane, facts.value, options.needs) : (lastStep ?? FIRST_LANE_STEP[lane]);
     if (step === "done") return { kind: "done" };
     if (step === "waiting") {
+      if (goal === "funded") return { kind: "done" };
       await options.wait(options.settleDelayMs);
       continue;
     }
@@ -75,8 +77,6 @@ async function runLane(chain: GuestChain, lane: GuestLane, options: GuestLoopOpt
       continue;
     }
     console.warn(`[runLane] ${step} attempt ${attempt}: ${ran.reason}`);
-    const declined = chain.readDecline();
-    if (declined !== null) return { kind: "failed", step: "wallet", reason: declined };
     await options.wait(options.retryDelayMs * attempt);
   }
 }
@@ -85,7 +85,7 @@ export async function prepareGuest(chain: GuestChain, options: GuestLoopOptions)
   let failed: GuestStage | null = null;
   const laneOptions: GuestLoopOptions = { ...options, isStopped: () => options.isStopped() || failed !== null };
   const runUntilFailed = async (lane: GuestLane) => {
-    const end = await runLane(chain, lane, laneOptions);
+    const end = await runLane(chain, lane, laneOptions, "ready");
     if (end.kind === "failed" && failed === null) failed = { kind: "failed", step: end.step, reason: end.reason };
     return end;
   };
@@ -93,4 +93,8 @@ export async function prepareGuest(chain: GuestChain, options: GuestLoopOptions)
   const outcome: GuestStage = failed ?? (ends.every((end) => end.kind === "done") ? { kind: "ready" } : { kind: "failed", step: "sit", reason: "stopped" });
   options.onStage(outcome);
   return outcome;
+}
+
+export async function fundAheadOfSeat(chain: GuestChain, options: GuestLoopOptions): Promise<LaneEnd> {
+  return runLane(chain, "money", options, "funded");
 }

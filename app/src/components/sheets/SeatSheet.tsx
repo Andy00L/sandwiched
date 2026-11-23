@@ -73,7 +73,7 @@ function WalletChoices({ wallets, onPick }: { wallets: readonly WalletChoice[]; 
   if (wallets.length === 0) return null;
   return (
     <>
-      <p className={styles.label}>Or use your wallet</p>
+      <p className={styles.label}>Or cash out to your wallet</p>
       <div className={styles.actions}>
         {wallets.map((choice) => (
           <InkButton key={choice.name} onPress={() => onPick(choice)}>
@@ -84,7 +84,7 @@ function WalletChoices({ wallets, onPick }: { wallets: readonly WalletChoice[]; 
           </InkButton>
         ))}
       </div>
-      <p className={styles.small}>Your wallet signs up to five times to seat you. After that, pecking needs no popups for one hour.</p>
+      <p className={styles.small}>Your wallet only connects, it signs nothing. You play with the test wallet of this browser, and cashing out sends your crumbs to your wallet.</p>
     </>
   );
 }
@@ -129,7 +129,7 @@ export function SeatSheet({ flow, onPlay, onBack }: SeatSheetProps) {
               Back to the park
             </button>
           </div>
-          {isPractice ? null : <WalletChoices wallets={wallets} onPick={(choice) => play({ kind: "browser", choice })} />}
+          <WalletChoices wallets={wallets} onPick={(choice) => play({ kind: "browser", choice })} />
         </>
       ) : null}
       {sheet.phase === "seating" ? (
