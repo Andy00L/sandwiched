@@ -1,0 +1,76 @@
+.curtain {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: var(--lawn);
+}
+
+.curtain[data-state="ready"] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--curtain-out) ease-out, visibility 0s linear var(--curtain-out);
+}
+
+.stack {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 0 24px;
+  text-align: center;
+}
+
+.pigeon {
+  transform-origin: 50% 100%;
+  filter: drop-shadow(2px 3px 1.5px var(--contact)) drop-shadow(8px 10px 10px var(--cast));
+}
+
+.pigeon[data-pecking="true"] {
+  animation: peck 1.2s ease-in-out infinite;
+}
+
+@keyframes peck {
+  0%,
+  38%,
+  100% {
+    transform: rotate(0deg);
+  }
+  46%,
+  62% {
+    transform: rotate(17deg);
+  }
+  54% {
+    transform: rotate(4deg);
+  }
+  72% {
+    transform: rotate(0deg);
+  }
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-title), Georgia, serif;
+  font-weight: 400;
+  font-size: clamp(26px, 3.4vw, 36px);
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.reason {
+  margin: 0;
+  max-width: 44ch;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-text);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pigeon[data-pecking="true"] {
+    animation: none;
+    transform: rotate(10deg);
+  }
+}

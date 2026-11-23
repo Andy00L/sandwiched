@@ -1,10 +1,12 @@
 import * as P2 from "papercraft/lib/paperkit-2d.js";
 import { installGameAudio, readGameAudio } from "../audio/game-audio";
+import { attempt } from "../chain/result";
 import { PALETTE } from "../table/palette";
 import type { SignpostLook } from "../table/pieces/signpost";
 import { loadRecordedRound } from "../table/replay/recorded-rounds";
 import { REPLAY_LEAD_S } from "../table/replay/replay-scene";
 import type { SignpostPlacement } from "../table/scene";
+import { reportSceneDrawn, reportSceneFailed } from "./boot-state";
 import { CHIPS_PER_ANTE, LIVE_TIMING, MAX_SEATS, TICK_MS } from "./chain-rules";
 import { type PlayController, createPlayController } from "./play-controller";
 import { ROUND_SCHEMA_VERSION, type RecordedRound } from "./round-events";
@@ -15,6 +17,7 @@ import { describeLivePlayer } from "./table-store";
 const ATTRACT_ROUND = "slam-showcase";
 const PAPER_TILE_PX = 384;
 const PAPER_PAGE = "#ebddbf";
+const SCENE_DEADLINE_MS = 20_000;
 
 const LIVE_PLAYERS = Array.from({ length: MAX_SEATS }, (_unused, seat) => describeLivePlayer(seat));
 
@@ -102,6 +105,7 @@ export function createGameSession(): GameSession {
     onMuteKey: () => readGameAudio().toggleMute(),
   });
   const start = () => {
+    window.setTimeout(() => reportSceneFailed(`the park drew no frame within ${SCENE_DEADLINE_MS / 1000} s`), SCENE_DEADLINE_MS);
     installGameAudio();
     installPaperTexture();
     window.addEventListener("keydown", controller.handleKey);
@@ -112,14 +116,20 @@ export function createGameSession(): GameSession {
       }
       if (!isLive) switchable.switchTo(createReplaySource(loaded.round, REPLAY_LEAD_S));
     });
-    void import("../table/scene").then(({ buildGameScene }) =>
+    void attempt(async () => {
+      const { buildGameScene } = await import("../table/scene");
       buildGameScene({
         source: switchable.source,
         onClick: controller.clickTable,
         signposts: listSignposts(controller),
         readShot: () => (controller.getSnapshot().flow.kind === "home" ? "overview" : "table"),
-      }),
-    );
+        onSecondFrame: reportSceneDrawn,
+      });
+    }).then((built) => {
+      if (built.ok) return;
+      console.warn(`[createGameSession] scene: ${built.reason}`);
+      reportSceneFailed(built.reason);
+    });
   };
   return { controller, start };
 }

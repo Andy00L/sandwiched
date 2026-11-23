@@ -16,6 +16,7 @@
   --lawn: #b4c08f;
   --sheet-in: 0.35s;
   --sheet-out: 0.28s;
+  --curtain-out: 0.5s;
   --sheet-ease-in: cubic-bezier(0.16, 1, 0.3, 1);
   --sheet-ease-out: cubic-bezier(0.4, 0, 1, 1);
 }
@@ -39,5 +40,6 @@ canvas {
   :root {
     --sheet-in: 0s;
     --sheet-out: 0s;
+    --curtain-out: 0s;
   }
 }

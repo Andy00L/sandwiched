@@ -82,6 +82,7 @@ export type GameScenePorts = {
   onClick: (target: ClickTarget) => void;
   signposts: readonly SignpostPlacement[];
   readShot: () => CameraShot;
+  onSecondFrame: () => void;
 };
 
 const TITLE_BANNER_SPOT = { x: 1, z: -31, halfWidth: 12 };
@@ -222,14 +223,14 @@ async function readSceneMode(): Promise<SceneMode> {
 }
 
 export async function buildStageScene(): Promise<void> {
-  buildScene(await readSceneMode(), [], null);
+  buildScene(await readSceneMode(), [], null, null);
 }
 
 export function buildGameScene(ports: GameScenePorts): void {
-  buildScene({ kind: "rounds", source: ports.source, onClick: ports.onClick }, ports.signposts, ports.readShot);
+  buildScene({ kind: "rounds", source: ports.source, onClick: ports.onClick }, ports.signposts, ports.readShot, ports.onSecondFrame);
 }
 
-function buildScene(mode: SceneMode, signposts: readonly SignpostPlacement[], readShot: (() => CameraShot) | null): void {
+function buildScene(mode: SceneMode, signposts: readonly SignpostPlacement[], readShot: (() => CameraShot) | null, onSecondFrame: (() => void) | null): void {
   const onClick = mode.kind === "rounds" ? mode.onClick : null;
   const quality = storedQuality();
   const harness = createHarness({
@@ -256,12 +257,23 @@ function buildScene(mode: SceneMode, signposts: readonly SignpostPlacement[], re
     if (onClick !== null || pickable.length > 0) listenForTableClicks(harness, { boxes, signposts: pickable, onClick: onClick ?? ignoreClick });
   }
   trimHiddenBacksOnceRisen(harness);
+  if (onSecondFrame !== null) callOnceAtStep(harness, SECOND_FRAME_STEP, onSecondFrame);
   harness.start();
   if (readShot !== null) directCameraShots(harness, readShot);
   registerSceneCapture(harness.captureFrame);
   probeQualityTier(harness);
   holdAtRequestedTime();
   reportFrameTimesWhenAsked(harness);
+}
+
+const SECOND_FRAME_STEP = 2;
+
+function callOnceAtStep(harness: Harness, stepNumber: number, callback: () => void): void {
+  let stepsSeen = 0;
+  harness.onStep(() => {
+    stepsSeen += 1;
+    if (stepsSeen === stepNumber) callback();
+  });
 }
 
 function holdAtRequestedTime(): void {
