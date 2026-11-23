@@ -1,7 +1,7 @@
 import type { RecordedRound, RoundEvent } from "../game/round-events";
 import { createAudioEngine } from "./audio-engine";
 import type { AudioEngine } from "./audio-engine";
-import { keepAudioLevels, readAudioLevels } from "./audio-levels";
+import { readAudioLevels, storeAudioLevels } from "./audio-levels";
 import type { AudioLevels } from "./mix";
 import type { AudioClock } from "./sound-plan";
 
@@ -26,7 +26,7 @@ export function readGameAudio(): GameAudio {
 }
 
 export function changeAudioLevels(levels: AudioLevels): void {
-  keepAudioLevels(levels);
+  storeAudioLevels(levels);
   installedEngine?.setLevels(levels);
 }
 
